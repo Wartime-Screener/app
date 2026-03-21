@@ -3,3 +3,7 @@ pandas>=2.1.0
 requests>=2.31.0
 python-dateutil>=2.8.2
 plotly>=5.18.0
+yfinance>=0.2.30
+anthropic>=0.30.0
+python-dotenv>=1.0.0
+numpy>=1.24.0

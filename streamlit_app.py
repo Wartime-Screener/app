@@ -15,8 +15,20 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dotenv import load_dotenv
-load_dotenv(override=True)  # Load API keys from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)  # Load API keys from .env file
+except ImportError:
+    pass  # python-dotenv not required on Streamlit Cloud
+
+# Load Streamlit Cloud secrets into environment variables if available
+try:
+    import streamlit as _st
+    for key, value in _st.secrets.items():
+        if isinstance(value, str):
+            os.environ.setdefault(key, value)
+except (AttributeError, FileNotFoundError, Exception):
+    pass
 
 import pandas as pd
 import plotly.express as px
