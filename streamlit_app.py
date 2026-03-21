@@ -1213,7 +1213,7 @@ with tab2:
                                 growth_label += f"  ·  {' | '.join(ref_parts)}"
                             user_growth = st.number_input(
                                 growth_label,
-                                min_value=-10.0, max_value=25.0,
+                                min_value=-20.0, max_value=75.0,
                                 value=float(default_growth),
                                 step=0.25,
                                 format="%.2f",
