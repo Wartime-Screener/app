@@ -90,9 +90,12 @@ st.set_page_config(
 
 # Load Streamlit Cloud secrets into environment variables if available
 try:
-    for key, value in st.secrets.items():
-        if isinstance(value, str):
-            os.environ.setdefault(key, value)
+    _secrets_path = Path.home() / ".streamlit" / "secrets.toml"
+    _local_secrets = Path(__file__).parent / ".streamlit" / "secrets.toml"
+    if _secrets_path.exists() or _local_secrets.exists() or os.environ.get("STREAMLIT_SHARING_MODE"):
+        for key, value in st.secrets.items():
+            if isinstance(value, str):
+                os.environ.setdefault(key, value)
 except (AttributeError, FileNotFoundError, Exception):
     pass
 
