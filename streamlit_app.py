@@ -1201,44 +1201,74 @@ with tab2:
                         st.info(analyst_label)
 
                     with st.form(key="dcf_form"):
-                        input_cols = st.columns(3)
-                        with input_cols[0]:
-                            growth_label = "FCF Growth Rate (%)"
-                            ref_parts = []
-                            if hist_growth is not None:
-                                ref_parts.append(f"Hist: {hist_growth:+.1f}%")
-                            if analyst_growth is not None:
-                                ref_parts.append(f"Analyst: {analyst_growth:+.1f}%")
-                            if ref_parts:
-                                growth_label += f"  ·  {' | '.join(ref_parts)}"
+                        # Growth reference info
+                        ref_parts = []
+                        if hist_growth is not None:
+                            ref_parts.append(f"Hist FCF CAGR: {hist_growth:+.1f}%")
+                        if analyst_growth is not None:
+                            ref_parts.append(f"Analyst: {analyst_growth:+.1f}%")
+                        if ref_parts:
+                            st.caption(f"Reference: {' | '.join(ref_parts)}")
+
+                        # Multi-stage growth toggle
+                        use_multistage = st.checkbox("Use multi-stage growth (recommended)", value=True,
+                                                     help="Model growth deceleration over time. Phase 1 = near-term high growth, "
+                                                          "Phase 2 = maturing, Phase 3 = stable pre-terminal growth.")
+
+                        if use_multistage:
+                            st.markdown("**Growth Phases** *(total must equal 10 years)*")
+                            phase_cols = st.columns(6)
+                            with phase_cols[0]:
+                                p1_rate = st.number_input("Phase 1 Rate (%)", min_value=-20.0, max_value=75.0,
+                                                          value=float(default_growth), step=0.25, format="%.2f",
+                                                          key="dcf_p1_rate")
+                            with phase_cols[1]:
+                                p1_years = st.number_input("Years", min_value=1, max_value=9,
+                                                           value=3, step=1, key="dcf_p1_years")
+                            with phase_cols[2]:
+                                p2_rate = st.number_input("Phase 2 Rate (%)", min_value=-20.0, max_value=75.0,
+                                                          value=max(float(default_growth) * 0.6, 2.0),
+                                                          step=0.25, format="%.2f", key="dcf_p2_rate")
+                            with phase_cols[3]:
+                                p2_years = st.number_input("Years", min_value=1, max_value=9,
+                                                           value=4, step=1, key="dcf_p2_years")
+                            with phase_cols[4]:
+                                p3_rate = st.number_input("Phase 3 Rate (%)", min_value=-20.0, max_value=75.0,
+                                                          value=max(float(default_growth) * 0.3, 2.0),
+                                                          step=0.25, format="%.2f", key="dcf_p3_rate")
+                            with phase_cols[5]:
+                                p3_years = st.number_input("Years", min_value=0, max_value=9,
+                                                           value=3, step=1, key="dcf_p3_years")
+
+                            total_years = p1_years + p2_years + p3_years
+                            if total_years != 10:
+                                st.warning(f"⚠️ Phases total {total_years} years — should equal 10")
+                            user_growth = p1_rate  # for display purposes
+                        else:
                             user_growth = st.number_input(
-                                growth_label,
+                                "FCF Growth Rate (%) — flat for all 10 years",
                                 min_value=-20.0, max_value=75.0,
                                 value=float(default_growth),
-                                step=0.25,
-                                format="%.2f",
-                                key="dcf_growth",
-                                help="Annual growth rate applied to free cash flow for the projection period. "
-                                     "Reference the historical FCF CAGR and analyst consensus revenue growth above.",
+                                step=0.25, format="%.2f", key="dcf_growth",
+                                help="Single growth rate applied to all 10 projection years.",
                             )
-                        with input_cols[1]:
+
+                        # WACC and Terminal
+                        wacc_term_cols = st.columns(2)
+                        with wacc_term_cols[0]:
                             user_discount = st.number_input(
                                 f"Discount Rate / WACC (%)  ·  Beta: {assumptions.get('beta', 1.0):.2f}",
                                 min_value=5.0, max_value=18.0,
                                 value=float(default_discount),
-                                step=0.25,
-                                format="%.2f",
-                                key="dcf_discount",
+                                step=0.25, format="%.2f", key="dcf_discount",
                                 help="Rate used to discount future cash flows. Higher = more conservative.",
                             )
-                        with input_cols[2]:
+                        with wacc_term_cols[1]:
                             user_terminal = st.number_input(
                                 "Terminal Growth Rate (%)",
                                 min_value=1.0, max_value=4.0,
                                 value=float(default_terminal),
-                                step=0.25,
-                                format="%.2f",
-                                key="dcf_terminal",
+                                step=0.25, format="%.2f", key="dcf_terminal",
                                 help="Perpetual growth rate after projection period. Usually 2-3% (GDP growth).",
                             )
                         recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
@@ -1246,15 +1276,27 @@ with tab2:
                     # --- Recompute DCF if user clicked Recalculate ---
                     dcf_display = _dcf
                     if recalc:
+                        # Build growth stages if multi-stage is enabled
+                        stages = None
+                        if use_multistage:
+                            stages = []
+                            if p1_years > 0:
+                                stages.append({"rate": p1_rate / 100.0, "years": p1_years})
+                            if p2_years > 0:
+                                stages.append({"rate": p2_rate / 100.0, "years": p2_years})
+                            if p3_years > 0:
+                                stages.append({"rate": p3_rate / 100.0, "years": p3_years})
+
                         dcf_display = compute_dcf_valuation(
                             cash_flow_statements=_analysis.get("cash_flow_statements", []),
                             income_statements=_analysis.get("income_statements", []),
                             profile=_analysis.get("profile", {}),
                             balance_sheets=_analysis.get("balance_sheets", []),
-                            growth_rate_override=user_growth / 100.0,
+                            growth_rate_override=user_growth / 100.0 if not use_multistage else None,
                             discount_rate_override=user_discount / 100.0,
                             terminal_growth_override=user_terminal / 100.0,
                             analyst_estimates=_analysis.get("analyst_estimates", []),
+                            growth_stages=stages,
                         )
                         # Show any new warnings from recompute
                         for w in dcf_display.get("warnings", []):
@@ -1286,9 +1328,13 @@ with tab2:
                     # --- Key assumptions summary ---
                     assumptions_updated = dcf_display.get("assumptions", assumptions)
                     base_fcf = assumptions_updated.get("base_fcf", 0)
+                    if use_multistage and recalc:
+                        growth_desc = f"Growth: {p1_rate:.1f}%×{p1_years}yr → {p2_rate:.1f}%×{p2_years}yr → {p3_rate:.1f}%×{p3_years}yr"
+                    else:
+                        growth_desc = f"Growth: {user_growth:.2f}%"
                     st.caption(
                         f"Base FCF: ${base_fcf/1e9:.2f}B  ·  "
-                        f"Growth: {user_growth:.2f}%  ·  "
+                        f"{growth_desc}  ·  "
                         f"WACC: {user_discount:.2f}%  ·  "
                         f"Terminal: {user_terminal:.2f}%  ·  "
                         f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"

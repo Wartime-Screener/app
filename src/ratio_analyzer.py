@@ -533,7 +533,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                            discount_rate_override: float | None = None,
                            terminal_growth_override: float | None = None,
                            projection_years: int = 10,
-                           analyst_estimates: list[dict] | None = None) -> dict:
+                           analyst_estimates: list[dict] | None = None,
+                           growth_stages: list[dict] | None = None) -> dict:
     """
     Discounted Cash Flow valuation — "what has to be true" model.
 
@@ -669,17 +670,37 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         warnings.append("Discount rate must exceed terminal growth — adjusting terminal growth down")
         terminal_growth = discount_rate - 0.01
 
-    # --- Project FCFs ---
+    # --- Project FCFs (multi-stage or single-stage) ---
     projected_fcfs = []
     fcf = base_fcf
-    for year in range(1, projection_years + 1):
-        fcf = fcf * (1 + growth_rate)
-        pv = fcf / (1 + discount_rate) ** year
-        projected_fcfs.append({
-            "year": year,
-            "fcf": round(fcf, 0),
-            "present_value": round(pv, 0),
-        })
+    if growth_stages:
+        # Multi-stage: each stage has {"rate": float, "years": int}
+        year_counter = 1
+        for stage in growth_stages:
+            stage_rate = stage["rate"]
+            stage_years = stage["years"]
+            for _ in range(stage_years):
+                if year_counter > projection_years:
+                    break
+                fcf = fcf * (1 + stage_rate)
+                pv = fcf / (1 + discount_rate) ** year_counter
+                projected_fcfs.append({
+                    "year": year_counter,
+                    "fcf": round(fcf, 0),
+                    "present_value": round(pv, 0),
+                    "stage_rate": round(stage_rate * 100, 1),
+                })
+                year_counter += 1
+    else:
+        # Single-stage (backward compatible)
+        for year in range(1, projection_years + 1):
+            fcf = fcf * (1 + growth_rate)
+            pv = fcf / (1 + discount_rate) ** year
+            projected_fcfs.append({
+                "year": year,
+                "fcf": round(fcf, 0),
+                "present_value": round(pv, 0),
+            })
 
     # --- Terminal value ---
     terminal_fcf = projected_fcfs[-1]["fcf"] * (1 + terminal_growth)
