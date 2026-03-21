@@ -950,216 +950,220 @@ with tab2:
                                      height=min(len(trade_rows) * 35 + 38, 500))
 
         # Earnings Call Transcript — Management Commentary
-        with st.expander("Earnings Call — Management Commentary", expanded=False):
-            from datetime import datetime as _dt
-            from src.transcript_summarizer import summarize_transcript, is_configured as _anthropic_configured
+        @st.fragment
+        def _transcript_fragment():
+            with st.expander("Earnings Call — Management Commentary", expanded=False):
+                from datetime import datetime as _dt
+                from src.transcript_summarizer import summarize_transcript, is_configured as _anthropic_configured
 
-            # Fetch available transcript dates from FMP
-            _available_dates = fmp.get_earning_call_transcript_dates(analysis["ticker"], limit=20)
+                # Fetch available transcript dates from FMP
+                _available_dates = fmp.get_earning_call_transcript_dates(analysis["ticker"], limit=20)
 
-            if _available_dates:
-                _quarter_options = [d["period"] for d in _available_dates]
+                if _available_dates:
+                    _quarter_options = [d["period"] for d in _available_dates]
 
-                _tc_cols = st.columns([3, 1])
-                with _tc_cols[0]:
-                    _selected_quarter = st.selectbox(
-                        "Select Quarter",
-                        options=_quarter_options,
-                        index=0,
-                        key="transcript_quarter",
+                    _tc_cols = st.columns([3, 1])
+                    with _tc_cols[0]:
+                        _selected_quarter = st.selectbox(
+                            "Select Quarter",
+                            options=_quarter_options,
+                            index=0,
+                            key="transcript_quarter",
+                        )
+                    with _tc_cols[1]:
+                        _show_full = st.checkbox("Show full transcript", key="show_full_transcript")
+
+                    if not _anthropic_configured():
+                        st.warning("⚠️ ANTHROPIC_API_KEY not set in .env — transcript summarization unavailable.")
+
+                    # Find the matching date entry
+                    _selected_entry = next(
+                        (d for d in _available_dates if d["period"] == _selected_quarter), None
                     )
-                with _tc_cols[1]:
-                    _show_full = st.checkbox("Show full transcript", key="show_full_transcript")
+                    _tq = _selected_entry["quarter"] if _selected_entry else 1
+                    _ty = _selected_entry["year"] if _selected_entry else 2025
 
-                if not _anthropic_configured():
-                    st.warning("⚠️ ANTHROPIC_API_KEY not set in .env — transcript summarization unavailable.")
+                    # Use a form to prevent page scroll on submit
+                    with st.form(key="transcript_form"):
+                        _load_clicked = st.form_submit_button("Load Transcript")
 
-                # Find the matching date entry
-                _selected_entry = next(
-                    (d for d in _available_dates if d["period"] == _selected_quarter), None
+                    if _load_clicked:
+                        with st.spinner(f"Fetching {analysis['ticker']} {_selected_quarter} transcript..."):
+                            _transcript = fmp.get_earning_call_transcript(analysis["ticker"], _ty, _tq)
+                        if _transcript and _transcript.get("content"):
+                            with st.spinner("Analyzing transcript with Claude..."):
+                                _parsed = summarize_transcript(
+                                    _transcript["content"],
+                                    ticker=analysis["ticker"],
+                                    year=_ty,
+                                    quarter=_tq,
+                                )
+                            st.session_state["transcript_result"] = {
+                                "parsed": _parsed,
+                                "ticker": analysis["ticker"],
+                                "quarter": _selected_quarter,
+                                "date": _transcript.get("date", ""),
+                                "content": _transcript["content"],
+                            }
+                        else:
+                            st.session_state["transcript_result"] = None
+                            st.warning(f"No transcript available for {analysis['ticker']} {_selected_quarter}. This may be due to limited coverage for smaller companies or the quarter hasn't reported yet.")
+
+                    # Display cached transcript result
+                    _tr = st.session_state.get("transcript_result")
+                    if _tr and _tr.get("parsed") and _tr["ticker"] == analysis["ticker"] and _tr["quarter"] == _selected_quarter:
+                        _parsed = _tr["parsed"]
+                        st.caption(f"**{_tr['ticker']}** — {_tr['quarter']} Earnings Call  ·  Date: {_tr['date']}")
+
+                        # Executive summary + sentiment
+                        if _parsed.get("summary"):
+                            _sentiment_colors = {
+                                "bullish": "🟢",
+                                "neutral": "🟡",
+                                "bearish": "🔴",
+                            }
+                            _sent_icon = _sentiment_colors.get(_parsed.get("sentiment", "neutral"), "🟡")
+                            st.markdown(f"**{_sent_icon} Overall Sentiment: {_parsed.get('sentiment', 'neutral').title()}**")
+                            st.info(_parsed["summary"])
+
+                        # Key numbers called out
+                        if _parsed.get("key_numbers"):
+                            st.markdown("**📊 Key Numbers Mentioned**")
+                            _num_cols = st.columns(min(len(_parsed["key_numbers"]), 4))
+                            for _i, _num in enumerate(_parsed["key_numbers"][:8]):
+                                with _num_cols[_i % len(_num_cols)]:
+                                    st.markdown(f"• {_num}")
+
+                        # Categorized commentary
+                        _cat_icons = {
+                            "Pricing & Revenue": "💰",
+                            "Margins & Profitability": "📈",
+                            "Costs & Efficiency": "⚙️",
+                            "Demand & Volume": "📦",
+                            "Capital & Investment": "🏦",
+                            "Outlook & Guidance": "🔮",
+                            "Risks & Headwinds": "⚠️",
+                        }
+
+                        if _parsed.get("categories"):
+                            st.markdown("---")
+                            for _cat_name, _quotes in _parsed["categories"].items():
+                                _icon = _cat_icons.get(_cat_name, "💬")
+                                st.markdown(f"**{_icon} {_cat_name}**")
+                                for _quote in _quotes:
+                                    st.markdown(f"> {_quote}")
+                                st.markdown("")
+                        elif _parsed.get("source") == "error":
+                            st.warning(f"Could not summarize transcript: {_parsed.get('summary', 'Unknown error')}")
+                        else:
+                            st.warning("Could not extract management commentary from this transcript.")
+
+                        if _parsed.get("source") == "claude":
+                            st.caption("✨ Summarized by Claude Haiku  ·  Cached for 90 days")
+
+                        # Optionally show full transcript
+                        if _show_full:
+                            st.markdown("---")
+                            st.markdown("#### Full Transcript")
+                            st.markdown(_tr["content"])
+                else:
+                    st.info(f"No earnings call transcripts found for {analysis['ticker']} on FMP. "
+                            "This may be due to limited coverage for smaller companies.")
+
+                # Transcript Coverage Gap Detector (SEC EDGAR vs FMP) — only recent gaps
+                _edgar_gaps_raw = edgar.find_transcript_gaps(
+                    analysis["ticker"],
+                    _available_dates if _available_dates else [],
+                    limit=6,
                 )
-                _tq = _selected_entry["quarter"] if _selected_entry else 1
-                _ty = _selected_entry["year"] if _selected_entry else 2025
+                # Filter to only gaps from the last 12 months
+                from datetime import datetime as _dt, timedelta as _td
+                _cutoff = (_dt.now() - _td(days=365)).strftime("%Y-%m-%d")
+                _edgar_gaps = [g for g in _edgar_gaps_raw if g.get("filingDate", "2000-01-01") >= _cutoff]
+                if _edgar_gaps:
+                    st.markdown("---")
+                    st.markdown("**📂 SEC Filing Coverage Gaps**")
+                    for _gap in _edgar_gaps:
+                        _gap_date = _gap.get("filingDate", "unknown date")
+                        _gap_period = _gap.get("period", "unknown period")
+                        _gap_form = _gap.get("form", "")
+                        st.warning(
+                            f"SEC {_gap_form} filing found for {_gap_period} "
+                            f"(filed {_gap_date}) but no FMP transcript available. "
+                            f"Try pasting the transcript manually."
+                        )
 
-                # Use a form to prevent page scroll on submit
-                with st.form(key="transcript_form"):
-                    _load_clicked = st.form_submit_button("Load Transcript")
+                # Manual transcript paste section
+                st.markdown("---")
+                st.markdown("**📋 Paste a Transcript Manually**")
+                st.caption("Paste raw earnings call text from any source and Claude will summarize it.")
 
-                if _load_clicked:
-                    with st.spinner(f"Fetching {analysis['ticker']} {_selected_quarter} transcript..."):
-                        _transcript = fmp.get_earning_call_transcript(analysis["ticker"], _ty, _tq)
-                    if _transcript and _transcript.get("content"):
-                        with st.spinner("Analyzing transcript with Claude..."):
-                            _parsed = summarize_transcript(
-                                _transcript["content"],
-                                ticker=analysis["ticker"],
-                                year=_ty,
-                                quarter=_tq,
-                            )
-                        st.session_state["transcript_result"] = {
-                            "parsed": _parsed,
-                            "ticker": analysis["ticker"],
-                            "quarter": _selected_quarter,
-                            "date": _transcript.get("date", ""),
-                            "content": _transcript["content"],
-                        }
+                with st.form(key="manual_transcript_form"):
+                    _manual_text = st.text_area(
+                        "Paste transcript text here",
+                        height=200,
+                        key="manual_transcript_text",
+                        placeholder="Paste the full or partial earnings call transcript here...",
+                    )
+                    _manual_submit = st.form_submit_button("📝 Summarize with Claude")
+
+                if _manual_submit and _manual_text and len(_manual_text.strip()) > 100:
+                    if not _anthropic_configured():
+                        st.warning("⚠️ ANTHROPIC_API_KEY not set in .env — transcript summarization unavailable.")
                     else:
-                        st.session_state["transcript_result"] = None
-                        st.warning(f"No transcript available for {analysis['ticker']} {_selected_quarter}. This may be due to limited coverage for smaller companies or the quarter hasn't reported yet.")
-
-                # Display cached transcript result
-                _tr = st.session_state.get("transcript_result")
-                if _tr and _tr.get("parsed") and _tr["ticker"] == analysis["ticker"] and _tr["quarter"] == _selected_quarter:
-                    _parsed = _tr["parsed"]
-                    st.caption(f"**{_tr['ticker']}** — {_tr['quarter']} Earnings Call  ·  Date: {_tr['date']}")
-
-                    # Executive summary + sentiment
-                    if _parsed.get("summary"):
-                        _sentiment_colors = {
-                            "bullish": "🟢",
-                            "neutral": "🟡",
-                            "bearish": "🔴",
+                        with st.spinner("Analyzing pasted transcript with Claude..."):
+                            _manual_parsed = summarize_transcript(
+                                _manual_text.strip(),
+                                ticker=analysis["ticker"],
+                                year=0,
+                                quarter=0,
+                                skip_cache=True,
+                            )
+                        st.session_state["manual_transcript_result"] = {
+                            "parsed": _manual_parsed,
+                            "ticker": analysis["ticker"],
                         }
-                        _sent_icon = _sentiment_colors.get(_parsed.get("sentiment", "neutral"), "🟡")
-                        st.markdown(f"**{_sent_icon} Overall Sentiment: {_parsed.get('sentiment', 'neutral').title()}**")
-                        st.info(_parsed["summary"])
+                elif _manual_submit and _manual_text and len(_manual_text.strip()) <= 100:
+                    st.warning("Transcript text is too short. Paste at least a few paragraphs for meaningful analysis.")
 
-                    # Key numbers called out
-                    if _parsed.get("key_numbers"):
+                _mtr = st.session_state.get("manual_transcript_result")
+                if _mtr and _mtr.get("parsed") and _mtr["ticker"] == analysis["ticker"]:
+                    _mp = _mtr["parsed"]
+
+                    if _mp.get("summary"):
+                        _sentiment_colors = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
+                        _sent_icon = _sentiment_colors.get(_mp.get("sentiment", "neutral"), "🟡")
+                        st.markdown(f"**{_sent_icon} Overall Sentiment: {_mp.get('sentiment', 'neutral').title()}**")
+                        st.info(_mp["summary"])
+
+                    if _mp.get("key_numbers"):
                         st.markdown("**📊 Key Numbers Mentioned**")
-                        _num_cols = st.columns(min(len(_parsed["key_numbers"]), 4))
-                        for _i, _num in enumerate(_parsed["key_numbers"][:8]):
-                            with _num_cols[_i % len(_num_cols)]:
+                        _mn_cols = st.columns(min(len(_mp["key_numbers"]), 4))
+                        for _i, _num in enumerate(_mp["key_numbers"][:8]):
+                            with _mn_cols[_i % len(_mn_cols)]:
                                 st.markdown(f"• {_num}")
 
-                    # Categorized commentary
-                    _cat_icons = {
-                        "Pricing & Revenue": "💰",
-                        "Margins & Profitability": "📈",
-                        "Costs & Efficiency": "⚙️",
-                        "Demand & Volume": "📦",
-                        "Capital & Investment": "🏦",
-                        "Outlook & Guidance": "🔮",
-                        "Risks & Headwinds": "⚠️",
-                    }
-
-                    if _parsed.get("categories"):
+                    if _mp.get("categories"):
                         st.markdown("---")
-                        for _cat_name, _quotes in _parsed["categories"].items():
+                        _cat_icons = {
+                            "Pricing & Revenue": "💰", "Margins & Profitability": "📈",
+                            "Costs & Efficiency": "⚙️", "Demand & Volume": "📦",
+                            "Capital & Investment": "🏦", "Outlook & Guidance": "🔮",
+                            "Risks & Headwinds": "⚠️",
+                        }
+                        for _cat_name, _quotes in _mp["categories"].items():
                             _icon = _cat_icons.get(_cat_name, "💬")
                             st.markdown(f"**{_icon} {_cat_name}**")
                             for _quote in _quotes:
                                 st.markdown(f"> {_quote}")
                             st.markdown("")
-                    elif _parsed.get("source") == "error":
-                        st.warning(f"Could not summarize transcript: {_parsed.get('summary', 'Unknown error')}")
-                    else:
-                        st.warning("Could not extract management commentary from this transcript.")
+                    elif _mp.get("source") == "error":
+                        st.warning(f"Could not summarize: {_mp.get('summary', 'Unknown error')}")
 
-                    if _parsed.get("source") == "claude":
-                        st.caption("✨ Summarized by Claude Haiku  ·  Cached for 90 days")
+                    if _mp.get("source") == "claude":
+                        st.caption("✨ Summarized by Claude Haiku")
 
-                    # Optionally show full transcript
-                    if _show_full:
-                        st.markdown("---")
-                        st.markdown("#### Full Transcript")
-                        st.markdown(_tr["content"])
-            else:
-                st.info(f"No earnings call transcripts found for {analysis['ticker']} on FMP. "
-                        "This may be due to limited coverage for smaller companies.")
-
-            # Transcript Coverage Gap Detector (SEC EDGAR vs FMP) — only recent gaps
-            _edgar_gaps_raw = edgar.find_transcript_gaps(
-                analysis["ticker"],
-                _available_dates if _available_dates else [],
-                limit=6,
-            )
-            # Filter to only gaps from the last 12 months
-            from datetime import datetime as _dt, timedelta as _td
-            _cutoff = (_dt.now() - _td(days=365)).strftime("%Y-%m-%d")
-            _edgar_gaps = [g for g in _edgar_gaps_raw if g.get("filingDate", "2000-01-01") >= _cutoff]
-            if _edgar_gaps:
-                st.markdown("---")
-                st.markdown("**📂 SEC Filing Coverage Gaps**")
-                for _gap in _edgar_gaps:
-                    _gap_date = _gap.get("filingDate", "unknown date")
-                    _gap_period = _gap.get("period", "unknown period")
-                    _gap_form = _gap.get("form", "")
-                    st.warning(
-                        f"SEC {_gap_form} filing found for {_gap_period} "
-                        f"(filed {_gap_date}) but no FMP transcript available. "
-                        f"Try pasting the transcript manually."
-                    )
-
-            # Manual transcript paste section
-            st.markdown("---")
-            st.markdown("**📋 Paste a Transcript Manually**")
-            st.caption("Paste raw earnings call text from any source and Claude will summarize it.")
-
-            with st.form(key="manual_transcript_form"):
-                _manual_text = st.text_area(
-                    "Paste transcript text here",
-                    height=200,
-                    key="manual_transcript_text",
-                    placeholder="Paste the full or partial earnings call transcript here...",
-                )
-                _manual_submit = st.form_submit_button("📝 Summarize with Claude")
-
-            if _manual_submit and _manual_text and len(_manual_text.strip()) > 100:
-                if not _anthropic_configured():
-                    st.warning("⚠️ ANTHROPIC_API_KEY not set in .env — transcript summarization unavailable.")
-                else:
-                    with st.spinner("Analyzing pasted transcript with Claude..."):
-                        _manual_parsed = summarize_transcript(
-                            _manual_text.strip(),
-                            ticker=analysis["ticker"],
-                            year=0,
-                            quarter=0,
-                            skip_cache=True,
-                        )
-                    st.session_state["manual_transcript_result"] = {
-                        "parsed": _manual_parsed,
-                        "ticker": analysis["ticker"],
-                    }
-            elif _manual_submit and _manual_text and len(_manual_text.strip()) <= 100:
-                st.warning("Transcript text is too short. Paste at least a few paragraphs for meaningful analysis.")
-
-            _mtr = st.session_state.get("manual_transcript_result")
-            if _mtr and _mtr.get("parsed") and _mtr["ticker"] == analysis["ticker"]:
-                _mp = _mtr["parsed"]
-
-                if _mp.get("summary"):
-                    _sentiment_colors = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
-                    _sent_icon = _sentiment_colors.get(_mp.get("sentiment", "neutral"), "🟡")
-                    st.markdown(f"**{_sent_icon} Overall Sentiment: {_mp.get('sentiment', 'neutral').title()}**")
-                    st.info(_mp["summary"])
-
-                if _mp.get("key_numbers"):
-                    st.markdown("**📊 Key Numbers Mentioned**")
-                    _mn_cols = st.columns(min(len(_mp["key_numbers"]), 4))
-                    for _i, _num in enumerate(_mp["key_numbers"][:8]):
-                        with _mn_cols[_i % len(_mn_cols)]:
-                            st.markdown(f"• {_num}")
-
-                if _mp.get("categories"):
-                    st.markdown("---")
-                    _cat_icons = {
-                        "Pricing & Revenue": "💰", "Margins & Profitability": "📈",
-                        "Costs & Efficiency": "⚙️", "Demand & Volume": "📦",
-                        "Capital & Investment": "🏦", "Outlook & Guidance": "🔮",
-                        "Risks & Headwinds": "⚠️",
-                    }
-                    for _cat_name, _quotes in _mp["categories"].items():
-                        _icon = _cat_icons.get(_cat_name, "💬")
-                        st.markdown(f"**{_icon} {_cat_name}**")
-                        for _quote in _quotes:
-                            st.markdown(f"> {_quote}")
-                        st.markdown("")
-                elif _mp.get("source") == "error":
-                    st.warning(f"Could not summarize: {_mp.get('summary', 'Unknown error')}")
-
-                if _mp.get("source") == "claude":
-                    st.caption("✨ Summarized by Claude Haiku")
+        _transcript_fragment()
 
         # DCF Valuation — "What Has to Be True"
         dcf = analysis.get("dcf_valuation", {})
