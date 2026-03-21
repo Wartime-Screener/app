@@ -685,16 +685,6 @@ with tab2:
                                       annotation_text="Weak (20th)")
                     st.plotly_chart(fig_qual, use_container_width=True)
 
-        # Opportunity flags
-        flags = analysis.get("opportunity_flags", [])
-        if flags:
-            st.subheader("Opportunity Flags")
-            for flag in flags:
-                if "caution" in flag.lower():
-                    st.warning(flag)
-                else:
-                    st.success(flag)
-
         # Fundamentals context — explains why valuation ratios are where they are
         fund_ctx = analysis.get("earnings_context", {})
         eps_history = fund_ctx.get("eps_history", [])
