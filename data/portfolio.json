@@ -1,0 +1,14 @@
+{
+  "positions": [
+    {
+      "id": "974eed9f-6110-41cc-a84f-5c6cca2dfb75",
+      "ticker": "BAH",
+      "buy_date": "2026-03-20",
+      "amount_invested": 1000.0,
+      "shares": 12.2941,
+      "cost_basis": 81.34,
+      "thesis_tag": "Wartime Catalyst",
+      "notes": "Defense/intel consultant, $38B backlog, funded backlog coiled spring"
+    }
+  ]
+}

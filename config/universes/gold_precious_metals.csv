@@ -1,0 +1,13 @@
+ticker,company_name,segment,sub_segment
+NEM,Newmont Corporation,gold,major
+GOLD,Barrick Gold Corporation,gold,major
+AEM,Agnico Eagle Mines Limited,gold,senior
+FNV,Franco-Nevada Corporation,gold,royalty_streaming
+WPM,Wheaton Precious Metals Corp,precious_metals,streaming
+RGLD,Royal Gold Inc,gold,royalty_streaming
+KGC,Kinross Gold Corporation,gold,senior
+AU,AngloGold Ashanti plc,gold,major
+GFI,Gold Fields Limited,gold,senior
+AG,First Majestic Silver Corp,silver,primary
+PAAS,Pan American Silver Corp,silver,major
+HL,Hecla Mining Company,silver_gold,diversified

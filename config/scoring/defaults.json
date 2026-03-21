@@ -1,0 +1,30 @@
+{
+  "weights": {
+    "pe_ratio": 0.20,
+    "ps_ratio": 0.15,
+    "pb_ratio": 0.10,
+    "ev_ebitda": 0.15,
+    "fcf_yield": 0.15,
+    "roe": 0.10,
+    "debt_to_equity": 0.15
+  },
+  "higher_is_better": [
+    "fcf_yield",
+    "roe",
+    "roa",
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "current_ratio",
+    "quick_ratio",
+    "interest_coverage",
+    "dividend_yield",
+    "roic",
+    "earnings_yield"
+  ],
+  "opportunity_thresholds": {
+    "low_percentile": 20,
+    "high_percentile": 80
+  },
+  "history_years": 20
+}

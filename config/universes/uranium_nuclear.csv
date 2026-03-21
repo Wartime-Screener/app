@@ -1,0 +1,10 @@
+ticker,company_name,segment,sub_segment
+CCJ,Cameco Corporation,uranium,mining
+UEC,Uranium Energy Corp,uranium,mining
+NXE,NexGen Energy Ltd,uranium,development
+LEU,Centrus Energy Corp,uranium,enrichment
+DNN,Denison Mines Corp,uranium,development
+UUUU,Energy Fuels Inc,uranium,mining_rare_earth
+SMR,NuScale Power Corporation,nuclear,small_modular_reactor
+VST,Vistra Corp,power,nuclear_operator
+CEG,Constellation Energy Corporation,power,nuclear_operator

@@ -1,0 +1,14 @@
+ticker,company_name,segment,sub_segment
+CRWD,CrowdStrike Holdings Inc,endpoint,cloud_native
+PANW,Palo Alto Networks Inc,network,platform
+FTNT,Fortinet Inc,network,firewall
+ZS,Zscaler Inc,cloud,zero_trust
+NET,Cloudflare Inc,cloud,edge_security
+S,SentinelOne Inc,endpoint,ai_security
+CYBR,CyberArk Software Ltd,identity,privileged_access
+BAH,Booz Allen Hamilton Holding Corp,consulting,government
+MNDT,Mandiant Inc,threat_intel,incident_response
+OKTA,Okta Inc,identity,access_management
+QLYS,Qualys Inc,vulnerability,cloud_platform
+TENB,Tenable Holdings Inc,vulnerability,exposure_management
+RPD,Rapid7 Inc,vulnerability,detection_response

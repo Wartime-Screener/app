@@ -1,0 +1,21 @@
+ticker,company_name,segment,sub_segment
+SLB,Schlumberger Limited,diversified_services,major
+HAL,Halliburton Company,diversified_services,major
+BKR,Baker Hughes Company,diversified_services,major
+NOV,NOV Inc,equipment,major
+FTI,TechnipFMC plc,diversified_services,subsea
+LBRT,Liberty Energy Inc,pressure_pumping,major
+HP,Helmerich & Payne Inc,drilling,onshore
+PTEN,Patterson-UTI Energy Inc,drilling,onshore
+RIG,Transocean Ltd,offshore_drilling,deepwater
+VAL,Valaris Limited,offshore_drilling,diversified
+NE,Noble Corporation plc,offshore_drilling,diversified
+WFRD,Weatherford International plc,diversified_services,mid_cap
+OII,Oceaneering International Inc,equipment,subsea
+BOOM,DMC Global Inc,equipment,specialty
+WTTR,Select Water Solutions Inc,completion,water_management
+XPRO,Expro Group Holdings NV,completion,well_flow
+RES,RPC Inc,completion,pressure_pumping
+CLB,Core Laboratories Inc,equipment,reservoir
+AESI,Atlas Energy Solutions Inc,completion,proppant
+TUSK,Mammoth Energy Services Inc,diversified_services,small_cap

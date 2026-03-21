@@ -1,0 +1,13 @@
+ticker,company_name,segment,sub_segment
+CCJ,Cameco Corporation,uranium_mining,major
+UEC,Uranium Energy Corp,uranium_mining,development
+NXE,NexGen Energy Ltd,uranium_mining,development
+DNN,Denison Mines Corp,uranium_mining,development
+LEU,Centrus Energy Corp,enrichment,major
+UUUU,Energy Fuels Inc,uranium_mining,production
+SMR,NuScale Power Corporation,smr,development
+VST,Vistra Corp,nuclear_utility,fleet_operator
+CEG,Constellation Energy Corporation,nuclear_utility,fleet_operator
+URA,Global X Uranium ETF,uranium_mining,etf
+OKLO,Oklo Inc,smr,development
+LTBR,Lightbridge Corporation,nuclear_utility,fuel_technology

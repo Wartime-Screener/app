@@ -1,0 +1,17 @@
+{
+  "app": {
+    "title": "Wartime Screener",
+    "port": 8502
+  },
+  "cache_ttl": {
+    "financial_statements": 86400,
+    "ratios": 86400,
+    "profiles": 604800,
+    "price_history": 14400,
+    "quotes": 300
+  },
+  "rate_limits": {
+    "fmp_delay": 0.3,
+    "tradier_delay": 0.15
+  }
+}

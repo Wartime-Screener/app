@@ -1,0 +1,9 @@
+ticker,company_name,segment,sub_segment
+MAR,Marriott International Inc,hotel,luxury_premium
+HLT,Hilton Worldwide Holdings Inc,hotel,diversified
+H,Hyatt Hotels Corporation,hotel,luxury
+WH,Wyndham Hotels & Resorts Inc,hotel,economy_midscale
+BKNG,Booking Holdings Inc,ota,global
+EXPE,Expedia Group Inc,ota,global
+ABNB,Airbnb Inc,ota,alternative_lodging
+TRIP,TripAdvisor Inc,ota,travel_media

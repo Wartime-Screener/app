@@ -1,0 +1,30 @@
+ticker,company_name,segment,sub_segment
+XOM,Exxon Mobil Corporation,integrated,supermajor
+CVX,Chevron Corporation,integrated,supermajor
+COP,ConocoPhillips,e_and_p,large_cap
+EOG,EOG Resources Inc,e_and_p,large_cap
+OXY,Occidental Petroleum Corporation,integrated,large_cap
+DVN,Devon Energy Corporation,e_and_p,large_cap
+FANG,Diamondback Energy Inc,e_and_p,permian
+APA,APA Corporation,e_and_p,mid_cap
+CTRA,Coterra Energy Inc,e_and_p,natural_gas
+OVV,Ovintiv Inc,e_and_p,mid_cap
+MUR,Murphy Oil Corporation,e_and_p,mid_cap
+SM,SM Energy Company,e_and_p,small_cap
+CHRD,Chord Energy Corporation,e_and_p,bakken
+MGY,Magnolia Oil & Gas Corporation,e_and_p,small_cap
+MTDR,Matador Resources Company,e_and_p,permian
+PR,Permian Resources Corporation,e_and_p,permian
+NOG,Northern Oil and Gas Inc,e_and_p,non_operated
+CRGY,Crescent Energy Company,e_and_p,diversified
+EXE,Expand Energy Corporation,e_and_p,natural_gas
+GPOR,Gulfport Energy Corporation,e_and_p,natural_gas
+RRC,Range Resources Corporation,e_and_p,natural_gas
+EQT,EQT Corporation,e_and_p,natural_gas
+AR,Antero Resources Corporation,e_and_p,natural_gas
+CNX,CNX Resources Corporation,e_and_p,natural_gas
+VLO,Valero Energy Corporation,integrated,refining
+MPC,Marathon Petroleum Corporation,integrated,refining
+PSX,Phillips 66,integrated,refining
+DINO,HF Sinclair Corporation,integrated,refining
+PBF,PBF Energy Inc,integrated,refining

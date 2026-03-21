@@ -1,0 +1,9 @@
+ticker,company_name,segment,sub_segment
+TRV,Travelers Companies Inc,p_and_c,commercial
+CB,Chubb Limited,p_and_c,global
+ALL,Allstate Corporation,p_and_c,personal
+PGR,Progressive Corporation,p_and_c,auto
+HIG,Hartford Financial Services Group,p_and_c,commercial
+AIG,American International Group Inc,p_and_c,global
+RNR,RenaissanceRe Holdings Ltd,reinsurance,specialty
+ACGL,Arch Capital Group Ltd,reinsurance,diversified

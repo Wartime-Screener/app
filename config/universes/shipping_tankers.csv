@@ -1,0 +1,14 @@
+ticker,company_name,segment,sub_segment
+FRO,Frontline plc,tanker,crude
+STNG,Scorpio Tankers Inc,tanker,product
+INSW,International Seaways Inc,tanker,crude_product
+TNK,Teekay Tankers Ltd,tanker,crude
+TRMD,TORM plc,tanker,product
+DHT,DHT Holdings Inc,tanker,vlcc
+ASC,Ardmore Shipping Corporation,tanker,product
+EURN,Euronav NV,tanker,crude
+HAFN,Hafnia Limited,tanker,product
+ZIM,ZIM Integrated Shipping Services,container,liner
+GOGL,Golden Ocean Group Limited,dry_bulk,capesize
+SBLK,Star Bulk Carriers Corp,dry_bulk,diversified
+MATX,Matson Inc,container,pacific

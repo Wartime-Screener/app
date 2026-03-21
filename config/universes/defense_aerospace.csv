@@ -1,0 +1,16 @@
+ticker,company_name,segment,sub_segment
+LMT,Lockheed Martin Corporation,defense_prime,aerospace
+RTX,RTX Corporation,defense_prime,diversified
+NOC,Northrop Grumman Corporation,defense_prime,aerospace
+GD,General Dynamics Corporation,defense_prime,diversified
+LHX,L3Harris Technologies Inc,defense_electronics,communications
+HII,Huntington Ingalls Industries Inc,shipbuilding,naval
+BA,Boeing Company,aerospace,commercial_defense
+TXT,Textron Inc,aerospace,diversified
+HWM,Howmet Aerospace Inc,aerospace,components
+KTOS,Kratos Defense & Security Solutions,defense_tech,drones
+LDOS,Leidos Holdings Inc,defense_it,services
+SAIC,Science Applications International Corp,defense_it,services
+PLTR,Palantir Technologies Inc,defense_tech,software
+AVAV,AeroVironment Inc,defense_tech,drones_tactical
+MRCY,Mercury Systems Inc,defense_electronics,components

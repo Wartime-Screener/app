@@ -1,0 +1,21 @@
+ticker,company_name,segment,sub_segment
+ADM,Archer-Daniels-Midland Company,grain_trading,major
+BG,Bunge Global SA,grain_trading,major
+CTVA,Corteva Inc,crop_protection,major
+CF,CF Industries Holdings Inc,fertilizer,nitrogen
+MOS,The Mosaic Company,fertilizer,phosphate_potash
+NTR,Nutrien Ltd,fertilizer,diversified
+FMC,FMC Corporation,crop_protection,specialty
+DE,Deere & Company,equipment,major
+AGCO,AGCO Corporation,equipment,mid_cap
+ANDE,The Andersons Inc,grain_trading,mid_cap
+INGR,Ingredion Incorporated,specialty,ingredients
+DAR,Darling Ingredients Inc,specialty,rendering
+CALM,Cal-Maine Foods Inc,specialty,eggs
+SMG,The Scotts Miracle-Gro Company,specialty,lawn_garden
+CNH,CNH Industrial NV,equipment,major
+AVTR,Avantor Inc,specialty,ag_science
+ICL,ICL Group Ltd,fertilizer,specialty
+LXU,LSB Industries Inc,fertilizer,nitrogen
+IIPR,Innovative Industrial Properties,specialty,cannabis_reit
+VITL,Vital Farms Inc,specialty,eggs
