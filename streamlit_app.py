@@ -21,15 +21,6 @@ try:
 except ImportError:
     pass  # python-dotenv not required on Streamlit Cloud
 
-# Load Streamlit Cloud secrets into environment variables if available
-try:
-    import streamlit as _st
-    for key, value in _st.secrets.items():
-        if isinstance(value, str):
-            os.environ.setdefault(key, value)
-except (AttributeError, FileNotFoundError, Exception):
-    pass
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -96,6 +87,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Load Streamlit Cloud secrets into environment variables if available
+try:
+    for key, value in st.secrets.items():
+        if isinstance(value, str):
+            os.environ.setdefault(key, value)
+except (AttributeError, FileNotFoundError, Exception):
+    pass
 
 
 @st.cache_resource
