@@ -213,9 +213,16 @@ def _session_save(data: dict):
     st.session_state["portfolio_dirty"] = True
 
 
-# Wire up the localStorage backend
-_portfolio_mod.set_storage_backend(_session_load, _session_save)
-_init_portfolio_from_localstorage()
+# Detect deployment: Streamlit Cloud sets STREAMLIT_SHARING_MODE or runs from /mount/src
+_IS_CLOUD = bool(os.environ.get("STREAMLIT_SHARING_MODE") or
+                 os.environ.get("HOSTNAME", "").startswith("streamlit") or
+                 str(Path(__file__)).startswith("/mount/"))
+
+if _IS_CLOUD:
+    # Deployed — each visitor gets their own portfolio via browser localStorage
+    _portfolio_mod.set_storage_backend(_session_load, _session_save)
+    _init_portfolio_from_localstorage()
+# else: local — portfolio.py falls back to data/portfolio.json (file-based)
 
 
 def format_universe_name(name: str) -> str:
@@ -2687,8 +2694,9 @@ with tab7:
             except (json.JSONDecodeError, Exception) as e:
                 st.error(f"Could not read file: {e}")
 
-    # Push any changes to browser localStorage
-    _push_portfolio_to_localstorage()
+    # Push any changes to browser localStorage (cloud only)
+    if _IS_CLOUD:
+        _push_portfolio_to_localstorage()
 
 # ------------------------------------------------------------------ #
 # Tab 8 — Settings
