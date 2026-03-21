@@ -15,13 +15,28 @@ import yfinance as yf
 PORTFOLIO_DIR = Path(__file__).resolve().parent.parent / "data"
 PORTFOLIO_FILE = PORTFOLIO_DIR / "portfolio.json"
 
+# ---------------------------------------------------------------------------
+# Pluggable storage backend
+# ---------------------------------------------------------------------------
+_load_fn = None
+_save_fn = None
+
+
+def set_storage_backend(load_fn, save_fn):
+    """Inject custom load/save functions (e.g. browser localStorage via session_state)."""
+    global _load_fn, _save_fn
+    _load_fn = load_fn
+    _save_fn = save_fn
+
 
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
 
 def load_portfolio() -> dict:
-    """Load portfolio from JSON file. Returns {"positions": [...]}."""
+    """Load portfolio. Uses injected backend if set, otherwise falls back to JSON file."""
+    if _load_fn:
+        return _load_fn()
     if PORTFOLIO_FILE.exists():
         with open(PORTFOLIO_FILE, "r") as f:
             return json.load(f)
@@ -29,7 +44,10 @@ def load_portfolio() -> dict:
 
 
 def save_portfolio(data: dict) -> None:
-    """Write portfolio dict to JSON file, creating directories as needed."""
+    """Save portfolio. Uses injected backend if set, otherwise falls back to JSON file."""
+    if _save_fn:
+        _save_fn(data)
+        return
     PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
     with open(PORTFOLIO_FILE, "w") as f:
         json.dump(data, f, indent=2)

@@ -39,11 +39,13 @@ from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
 from src.universe_loader import list_universes, load_universe
+import src.portfolio as _portfolio_mod
 from src.portfolio import (
     load_portfolio, save_portfolio, add_position, remove_position,
     get_all_tags, compute_position_performance, compute_portfolio_summary,
     compute_tag_performance, get_position_history, get_spy_benchmark,
 )
+from streamlit_js_eval import streamlit_js_eval
 
 # ------------------------------------------------------------------ #
 # Setup
@@ -147,6 +149,73 @@ fmp = get_fmp_client()
 eia = get_eia_client()
 fred = get_fred_client()
 edgar = get_edgar_client()
+
+# ---------------------------------------------------------------------------
+# Portfolio — browser localStorage backend
+# ---------------------------------------------------------------------------
+_LS_KEY = "wartime_screener_portfolio"
+
+
+def _init_portfolio_from_localstorage():
+    """Load portfolio from browser localStorage into session_state on first run."""
+    if "portfolio_loaded" in st.session_state:
+        return  # already loaded this session
+
+    raw = streamlit_js_eval(
+        js_expressions=f"localStorage.getItem('{_LS_KEY}')",
+        key="portfolio_load",
+    )
+
+    if raw is None:
+        # JS component hasn't mounted yet — retry a few times
+        attempts = st.session_state.get("_portfolio_load_attempts", 0) + 1
+        st.session_state["_portfolio_load_attempts"] = attempts
+        if attempts < 3:
+            import time
+            time.sleep(0.15)
+            st.rerun()
+        else:
+            # Give up waiting, start with empty portfolio
+            st.session_state["portfolio_data"] = {"positions": []}
+            st.session_state["portfolio_loaded"] = True
+        return
+
+    if raw in (0, "null", ""):
+        st.session_state["portfolio_data"] = {"positions": []}
+    else:
+        try:
+            st.session_state["portfolio_data"] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            st.session_state["portfolio_data"] = {"positions": []}
+
+    st.session_state["portfolio_loaded"] = True
+    st.session_state["portfolio_dirty"] = False
+
+
+def _push_portfolio_to_localstorage():
+    """If portfolio was modified this run, write it to browser localStorage."""
+    if st.session_state.get("portfolio_dirty"):
+        data_json = json.dumps(st.session_state["portfolio_data"])
+        escaped = data_json.replace("\\", "\\\\").replace("'", "\\'")
+        streamlit_js_eval(
+            js_expressions=f"localStorage.setItem('{_LS_KEY}', '{escaped}')",
+            key="portfolio_save",
+        )
+        st.session_state["portfolio_dirty"] = False
+
+
+def _session_load() -> dict:
+    return st.session_state.get("portfolio_data", {"positions": []})
+
+
+def _session_save(data: dict):
+    st.session_state["portfolio_data"] = data
+    st.session_state["portfolio_dirty"] = True
+
+
+# Wire up the localStorage backend
+_portfolio_mod.set_storage_backend(_session_load, _session_save)
+_init_portfolio_from_localstorage()
 
 
 def format_universe_name(name: str) -> str:
@@ -2513,7 +2582,7 @@ with tab7:
                             combined = pd.merge(combined, h, on="date", how="outer")
 
                     combined = combined.sort_values("date")
-                    combined = combined.fillna(method="ffill").fillna(0)
+                    combined = combined.ffill().fillna(0)
                     value_cols = [c for c in combined.columns if c != "date"]
                     combined["portfolio_value"] = combined[value_cols].sum(axis=1)
                     combined["return_pct"] = ((combined["portfolio_value"] - total_invested) / total_invested * 100).round(2)
@@ -2583,6 +2652,43 @@ with tab7:
                 st.info("Add positions to see tag analysis.")
     else:
         st.info("No positions yet. Use the form above to add your first position.")
+
+    # ---- Export / Import ---- #
+    st.divider()
+    st.subheader("💾 Export / Import Portfolio")
+    st.caption("Your portfolio is saved in this browser. Use export to back it up or move it to another device.")
+
+    exp_cols = st.columns([1, 1])
+    with exp_cols[0]:
+        _export_data = json.dumps(
+            st.session_state.get("portfolio_data", {"positions": []}), indent=2
+        )
+        st.download_button(
+            "⬇️ Export Portfolio (JSON)",
+            data=_export_data,
+            file_name="wartime_portfolio.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+    with exp_cols[1]:
+        _uploaded = st.file_uploader(
+            "⬆️ Import Portfolio (JSON)", type=["json"], key="portfolio_import"
+        )
+        if _uploaded is not None:
+            try:
+                _imported = json.loads(_uploaded.read().decode("utf-8"))
+                if "positions" in _imported and isinstance(_imported["positions"], list):
+                    st.session_state["portfolio_data"] = _imported
+                    st.session_state["portfolio_dirty"] = True
+                    st.success(f"Imported {len(_imported['positions'])} positions!")
+                    st.rerun()
+                else:
+                    st.error("Invalid portfolio file — expected a JSON object with a 'positions' array.")
+            except (json.JSONDecodeError, Exception) as e:
+                st.error(f"Could not read file: {e}")
+
+    # Push any changes to browser localStorage
+    _push_portfolio_to_localstorage()
 
 # ------------------------------------------------------------------ #
 # Tab 8 — Settings
