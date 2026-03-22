@@ -87,7 +87,7 @@ st.set_page_config(
     page_title=settings.get("app", {}).get("title", "Wartime Screener"),
     page_icon="🎖️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # Load Streamlit Cloud secrets into environment variables if available
@@ -242,47 +242,51 @@ def universe_display_map() -> dict[str, str]:
 # ------------------------------------------------------------------ #
 # Sidebar — API status
 # ------------------------------------------------------------------ #
-with st.sidebar:
-    st.title("Wartime Screener")
-    st.divider()
+st.title("🎖️ Wartime Screener")
 
-    # API status indicators
-    st.subheader("API Status")
-    if tradier.is_configured:
-        st.success("Tradier API: Connected", icon="✅")
-    else:
-        st.warning("Tradier API: Not configured (set TRADIER_TOKEN)", icon="⚠️")
+# API status as a collapsible expander in the header area
+from src.transcript_summarizer import is_configured as _anthropic_ok
 
-    if fmp.is_configured:
-        st.success("FMP API: Connected", icon="✅")
-    else:
-        st.warning("FMP API: Not configured (set FMP_API_KEY)", icon="⚠️")
+# Build a quick status summary for the expander label
+_api_count = sum([tradier.is_configured, fmp.is_configured, eia.is_configured,
+                  fred.is_configured, _anthropic_ok(), True])  # SEC EDGAR always connected
+_api_label = f"API Status — {_api_count}/6 connected"
 
-    if eia.is_configured:
-        st.success("EIA API: Connected", icon="✅")
-    else:
-        st.warning("EIA API: Not configured (set EIA_API_KEY)", icon="⚠️")
-
-    if fred.is_configured:
-        st.success("FRED API: Connected", icon="✅")
-    else:
-        st.warning("FRED API: Not configured (set FRED_API_KEY)", icon="⚠️")
-
-    from src.transcript_summarizer import is_configured as _anthropic_ok
-    if _anthropic_ok():
-        st.success("Claude AI: Connected", icon="✅")
-    else:
-        st.warning("Claude AI: Not configured (set ANTHROPIC_API_KEY)", icon="⚠️")
-
-    st.success("SEC EDGAR: Connected", icon="✅")
+with st.expander(_api_label, expanded=False):
+    _status_cols = st.columns(6)
+    with _status_cols[0]:
+        if tradier.is_configured:
+            st.success("Tradier ✅")
+        else:
+            st.warning("Tradier ⚠️")
+    with _status_cols[1]:
+        if fmp.is_configured:
+            st.success("FMP ✅")
+        else:
+            st.warning("FMP ⚠️")
+    with _status_cols[2]:
+        if eia.is_configured:
+            st.success("EIA ✅")
+        else:
+            st.warning("EIA ⚠️")
+    with _status_cols[3]:
+        if fred.is_configured:
+            st.success("FRED ✅")
+        else:
+            st.warning("FRED ⚠️")
+    with _status_cols[4]:
+        if _anthropic_ok():
+            st.success("Claude AI ✅")
+        else:
+            st.warning("Claude AI ⚠️")
+    with _status_cols[5]:
+        st.success("SEC EDGAR ✅")
 
     if not fmp.is_configured:
         st.info(
             "Running in degraded mode. Only Tradier quotes available. "
             "Set FMP_API_KEY for full fundamental analysis."
         )
-
-    st.divider()
 
 # ------------------------------------------------------------------ #
 # Tabs
