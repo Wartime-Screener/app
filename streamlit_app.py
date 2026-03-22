@@ -349,9 +349,10 @@ with tab1:
             help="Exclude tickers with P/E above this value.",
         )
 
-    # Scan button
-    col_scan, col_export = st.columns([1, 1])
-    with col_scan:
+    # Scan button — centered
+    _left, _center, _right = st.columns([2, 1, 2])
+    col_export = _right  # export button goes on the right after results load
+    with _center:
         scan_clicked = st.button("Scan Selected Universes", type="primary", use_container_width=True)
 
     if scan_clicked:
@@ -504,7 +505,9 @@ with tab1:
                 use_container_width=True,
             )
     else:
-        st.info("Click 'Scan Selected Universes' to begin analysis.")
+        _l, _c, _r = st.columns([2, 1, 2])
+        with _c:
+            st.info("Select universes and scan.")
 
 
 # ================================================================== #
