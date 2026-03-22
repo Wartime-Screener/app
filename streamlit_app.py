@@ -427,6 +427,7 @@ with tab1:
         display_df = display_df.rename(columns=rename_map)
 
         st.subheader(f"Results ({len(display_df)} tickers)")
+        st.caption("💡 Click a row to jump to Ticker Deep Dive")
 
         # Color-code percentile columns (direction-aware)
         # Map display %ile column names back to raw metric keys
@@ -465,11 +466,28 @@ with tab1:
             for pc in percentile_cols:
                 styled = styled.map(lambda val, _c=pc: color_percentile(val, _c), subset=[pc])
 
-        st.dataframe(
+        event = st.dataframe(
             styled,
             use_container_width=True,
             height=600,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="screener_table",
         )
+
+        # Handle row click → jump to Ticker Deep Dive
+        if event and event.selection and event.selection.rows:
+            clicked_row = event.selection.rows[0]
+            clicked_ticker = display_df.iloc[clicked_row]["Ticker"]
+            st.session_state["jump_to_ticker"] = clicked_ticker
+            # Use JS to click the "Ticker Deep Dive" tab (2nd tab, index 1)
+            streamlit_js_eval(
+                js_expressions="""
+                const tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+                if (tabs.length > 1) { tabs[1].click(); }
+                """,
+                key="click_deep_dive_tab",
+            )
 
         # Export button
         with col_export:
@@ -491,12 +509,28 @@ with tab1:
 with tab2:
     st.header("Ticker Deep Dive")
 
+    # --- Handle jump from Screener Dashboard click ---
+    _jump_ticker = st.session_state.pop("jump_to_ticker", None)
+
     # Universe selector — pick which universes to draw tickers from
     dd_uni_map = universe_display_map()
+
+    # If jumping from screener, auto-select the universe containing that ticker
+    _jump_default_universes = []
+    if _jump_ticker:
+        for display_name, file_name in dd_uni_map.items():
+            try:
+                udf = load_universe(file_name)
+                if _jump_ticker in udf["ticker"].values:
+                    _jump_default_universes.append(display_name)
+                    break
+            except Exception:
+                continue
+
     dd_display = st.multiselect(
         "Select Universes",
         options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
-        default=[],
+        default=_jump_default_universes or [],
         help="Choose one or more universes to load tickers from. ⚠️ = inverse plays.",
         key="dd_universes",
     )
@@ -515,15 +549,22 @@ with tab2:
             for _, row in all_tickers_df.iterrows() if row.get("company_name")
         }
 
+    # If jumping, pre-select the ticker in the selectbox
+    _jump_index = 0
+    if _jump_ticker and _jump_ticker in ticker_options:
+        _jump_index = ticker_options.index(_jump_ticker)
+
     selected_ticker = st.selectbox(
         "Select Ticker",
         options=ticker_options,
-        index=0 if ticker_options else None,
+        index=_jump_index if ticker_options else None,
         format_func=lambda t: ticker_labels.get(t, t),
         help="Choose a ticker for detailed fundamental analysis.",
     )
 
-    if selected_ticker and st.button("Analyze", key="deep_dive_btn"):
+    # Auto-analyze if jumped from screener, or manual button click
+    _trigger_analyze = bool(_jump_ticker and selected_ticker)
+    if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze:
         if not fmp.is_configured:
             st.error("FMP API key is required for deep dive analysis. Set FMP_API_KEY.")
         else:
