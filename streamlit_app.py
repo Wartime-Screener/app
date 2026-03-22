@@ -396,7 +396,7 @@ with tab1:
         # Select display columns
         display_cols = [
             "ticker", "company_name", "segment", "current_price",
-            "composite_score", "flags",
+            "composite_score",
         ]
 
         # Add ratio columns if they exist
