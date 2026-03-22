@@ -523,14 +523,14 @@ with tab2:
     # Universe selector — pick which universes to draw tickers from
     dd_uni_map = universe_display_map()
 
-    # If jumping from screener, auto-select the universe containing that ticker
-    _jump_default_universes = []
+    # If jumping from screener, force-set the universe and ticker widgets
     if _jump_ticker:
         for display_name, file_name in dd_uni_map.items():
             try:
                 udf = load_universe(file_name)
                 if _jump_ticker in udf["ticker"].values:
-                    _jump_default_universes.append(display_name)
+                    # Force the multiselect widget value via session_state
+                    st.session_state["dd_universes"] = [display_name]
                     break
             except Exception:
                 continue
@@ -538,7 +538,7 @@ with tab2:
     dd_display = st.multiselect(
         "Select Universes",
         options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
-        default=_jump_default_universes or [],
+        default=[],
         help="Choose one or more universes to load tickers from. ⚠️ = inverse plays.",
         key="dd_universes",
     )
@@ -557,17 +557,17 @@ with tab2:
             for _, row in all_tickers_df.iterrows() if row.get("company_name")
         }
 
-    # If jumping, pre-select the ticker in the selectbox
-    _jump_index = 0
+    # If jumping, force-set the selectbox to the clicked ticker
     if _jump_ticker and _jump_ticker in ticker_options:
-        _jump_index = ticker_options.index(_jump_ticker)
+        st.session_state["dd_ticker_select"] = _jump_ticker
 
     selected_ticker = st.selectbox(
         "Select Ticker",
         options=ticker_options,
-        index=_jump_index if ticker_options else None,
+        index=0 if ticker_options else None,
         format_func=lambda t: ticker_labels.get(t, t),
         help="Choose a ticker for detailed fundamental analysis.",
+        key="dd_ticker_select",
     )
 
     # Auto-analyze if jumped from screener, or manual button click
