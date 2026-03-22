@@ -305,18 +305,18 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 with tab1:
     st.header("Screener Dashboard")
 
-    # Sidebar controls for this tab
-    with st.sidebar:
-        st.subheader("Screener Filters")
-        uni_map = universe_display_map()
-        selected_display = st.multiselect(
-            "Select Universes",
-            options=sorted(uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
-            default=[],
-            help="Choose which sector universes to scan. ⚠️ = inverse plays (sectors likely hurt by conflict).",
-        )
-        selected_universes = [uni_map[d] for d in selected_display]
+    # --- Screener filters (inline) ---
+    uni_map = universe_display_map()
+    selected_display = st.multiselect(
+        "Select Universes",
+        options=sorted(uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
+        default=[],
+        help="Choose which sector universes to scan. ⚠️ = inverse plays (sectors likely hurt by conflict).",
+    )
+    selected_universes = [uni_map[d] for d in selected_display]
 
+    filter_cols = st.columns(3)
+    with filter_cols[0]:
         history_years = st.selectbox(
             "History Window",
             options=[5, 10, 20],
@@ -325,7 +325,7 @@ with tab1:
             help="How many years of historical data to use for percentile rankings.",
             key="history_years",
         )
-
+    with filter_cols[1]:
         score_threshold = st.slider(
             "Max Composite Score",
             min_value=0,
@@ -335,7 +335,7 @@ with tab1:
             help="Filter out tickers with composite score above this threshold. "
                  "Lower score = more potentially undervalued.",
         )
-
+    with filter_cols[2]:
         max_pe = st.number_input(
             "Max P/E Ratio",
             min_value=0.0,
