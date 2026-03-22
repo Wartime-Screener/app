@@ -677,7 +677,7 @@ with tab2:
                 rows.append({
                     "Metric": display_name,
                     "Current": data.get("current"),
-                    f"{history_years}yr Avg": data.get("hist_avg"),
+                    f"{history_years}yr Median": data.get("hist_median"),
                     f"{history_years}yr Low": data.get("hist_low"),
                     f"{history_years}yr High": data.get("hist_high"),
                     "Percentile": data.get("percentile"),
@@ -1598,7 +1598,7 @@ with tab3:
                     "Ticker": ticker,
                     "Company": analysis.get("company_name", ""),
                     "Current": metric_data.get("current"),
-                    f"{history_years}yr Avg": metric_data.get("hist_avg"),
+                    f"{history_years}yr Median": metric_data.get("hist_median"),
                     f"{history_years}yr Low": metric_data.get("hist_low"),
                     f"{history_years}yr High": metric_data.get("hist_high"),
                     "Percentile": metric_data.get("percentile"),
