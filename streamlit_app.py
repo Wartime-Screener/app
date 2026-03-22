@@ -505,9 +505,10 @@ with tab1:
                 use_container_width=True,
             )
     else:
-        _l, _c, _r = st.columns([2, 1, 2])
-        with _c:
-            st.info("Select universes and scan.")
+        st.markdown(
+            "<p style='text-align:center; color:gray;'>Select universes above and click <b>Scan</b> to begin.</p>",
+            unsafe_allow_html=True,
+        )
 
 
 # ================================================================== #
