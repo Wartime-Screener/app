@@ -2599,17 +2599,51 @@ with tab7:
         else:
             structured_notes = existing_notes if existing_notes else []
 
-        # Display existing notes in a styled box
+        # Display existing notes with per-line delete buttons
         if structured_notes:
-            rendered = _notes_to_markdown(structured_notes)
+            # Build the markers for display
+            _del_roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
+                          "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
+            _del_counters = {0: 0, 1: 0, 2: 0}
+            _display_lines = []
+            for idx, item in enumerate(structured_notes):
+                lvl = item.get("level", 0)
+                txt = item.get("text", "")
+                if not txt.strip():
+                    continue
+                for l in range(lvl + 1, 3):
+                    _del_counters[l] = 0
+                indent = "&nbsp;" * (8 * lvl)
+                if lvl == 0:
+                    marker = "•"
+                elif lvl == 1:
+                    c = _del_counters[1] % 26
+                    marker = f"{chr(97 + c)}."
+                    _del_counters[1] += 1
+                else:
+                    c = _del_counters[2] % len(_del_roman)
+                    marker = f"{_del_roman[c]}."
+                    _del_counters[2] += 1
+                _display_lines.append((idx, f"{indent}{marker} {txt}"))
+
             st.markdown(
-                f"""<div style="background-color: #1e1e2e; border: 1px solid #444;
-                border-radius: 8px; padding: 16px; margin-bottom: 16px;
+                """<div style="background-color: #1e1e2e; border: 1px solid #444;
+                border-radius: 8px; padding: 16px; margin-bottom: 8px;
                 font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
-                line-height: 1.8; white-space: pre-wrap; color: #e0e0e0;">
-{rendered}</div>""",
+                line-height: 1.8; color: #e0e0e0;">""",
                 unsafe_allow_html=True,
             )
+            for note_idx_display, (orig_idx, line_html) in enumerate(_display_lines):
+                dcol1, dcol2 = st.columns([20, 1])
+                with dcol1:
+                    st.markdown(line_html, unsafe_allow_html=True)
+                with dcol2:
+                    if st.button("✕", key=f"del_note_{note_pos['id']}_{orig_idx}",
+                                 help="Delete this note"):
+                        del structured_notes[orig_idx]
+                        update_position_notes(note_pos["id"], structured_notes)
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
         # Add new note — type and press Enter to save
         _roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
