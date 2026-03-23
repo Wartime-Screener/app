@@ -803,6 +803,267 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     }
 
 
+def compute_revenue_dcf_valuation(income_statements: list[dict],
+                                   cash_flow_statements: list[dict],
+                                   profile: dict,
+                                   balance_sheets: list[dict] | None = None,
+                                   revenue_growth_override: float | None = None,
+                                   target_fcf_margin_override: float | None = None,
+                                   discount_rate_override: float | None = None,
+                                   terminal_growth_override: float | None = None,
+                                   projection_years: int = 10,
+                                   analyst_estimates: list[dict] | None = None,
+                                   growth_stages: list[dict] | None = None) -> dict:
+    """
+    Revenue-based DCF — derives FCF from projected revenue × target FCF margin.
+
+    Useful for companies with negative/distorted FCF (SaaS transitions, high-growth,
+    turnarounds) where revenue is the more reliable starting point.
+    """
+    warnings = []
+
+    # --- Extract base revenue ---
+    revenues = []
+    for stmt in income_statements[:5]:
+        rev = _safe_float(stmt.get("revenue"))
+        if rev is not None and rev > 0:
+            revenues.append(rev)
+
+    if len(revenues) < 2:
+        return {"dcf_price": None, "warnings": ["Insufficient revenue history for DCF"],
+                "assumptions": {}, "has_data": False}
+
+    base_revenue = revenues[0]  # most recent annual revenue
+
+    # --- Historical FCF margin (FCF / Revenue) ---
+    hist_fcf_margins = []
+    for i, stmt in enumerate(income_statements[:5]):
+        rev = _safe_float(stmt.get("revenue"))
+        if rev and rev > 0 and i < len(cash_flow_statements):
+            fcf = _safe_float(cash_flow_statements[i].get("freeCashFlow"))
+            if fcf is not None:
+                hist_fcf_margins.append(fcf / rev)
+
+    hist_median_fcf_margin = float(np.median(hist_fcf_margins)) if hist_fcf_margins else None
+
+    # --- Historical revenue growth (CAGR) ---
+    hist_rev_growth = None
+    if len(revenues) >= 3:
+        oldest = revenues[-1]
+        newest = revenues[0]
+        years_span = len(revenues) - 1
+        if oldest > 0 and newest > 0:
+            hist_rev_growth = (newest / oldest) ** (1 / years_span) - 1
+
+    # --- Analyst revenue growth ---
+    analyst_revenue_growth = None
+    analyst_num_analysts = None
+    if analyst_estimates:
+        sorted_est = sorted(analyst_estimates, key=lambda x: x.get("date", ""))
+        rev_estimates = [(e["date"], e["revenueAvg"]) for e in sorted_est
+                         if e.get("revenueAvg") and e["revenueAvg"] > 0]
+        if len(rev_estimates) >= 2:
+            first_rev = rev_estimates[0][1]
+            last_rev = rev_estimates[-1][1]
+            years_span_est = len(rev_estimates) - 1
+            if first_rev > 0 and last_rev > 0:
+                analyst_revenue_growth = (last_rev / first_rev) ** (1 / years_span_est) - 1
+                analyst_num_analysts = max(
+                    (e.get("numAnalystsRevenue", 0) for e in sorted_est), default=None
+                )
+
+    # --- Shares outstanding ---
+    shares = None
+    if income_statements:
+        shares = _safe_float(
+            income_statements[0].get("weightedAverageShsOutDil")
+            or income_statements[0].get("weightedAverageShsOut")
+        )
+    if not shares or shares <= 0:
+        return {"dcf_price": None, "warnings": ["No shares outstanding data"],
+                "assumptions": {}, "has_data": False}
+
+    # --- Net debt ---
+    net_debt = 0.0
+    balance_sheets = balance_sheets or []
+    if balance_sheets:
+        latest_bs = balance_sheets[0]
+        total_debt = _safe_float(latest_bs.get("totalDebt") or latest_bs.get("longTermDebt"))
+        cash = _safe_float(latest_bs.get("cashAndCashEquivalents") or
+                           latest_bs.get("cashAndShortTermInvestments"))
+        if total_debt is not None and cash is not None:
+            net_debt = total_debt - cash
+        else:
+            warnings.append("Missing debt/cash data — skipping net debt adjustment")
+
+    # --- Growth rate ---
+    if revenue_growth_override is not None:
+        revenue_growth = revenue_growth_override
+    elif hist_rev_growth is not None:
+        revenue_growth = max(-0.05, min(0.30, hist_rev_growth))
+    else:
+        revenue_growth = 0.08
+        warnings.append("Could not compute historical revenue growth — using 8% default")
+
+    # --- Target FCF margin ---
+    if target_fcf_margin_override is not None:
+        target_fcf_margin = target_fcf_margin_override
+    elif hist_median_fcf_margin is not None and hist_median_fcf_margin > 0:
+        target_fcf_margin = hist_median_fcf_margin
+    else:
+        target_fcf_margin = 0.10  # conservative 10% default
+        warnings.append("No positive historical FCF margin — using 10% default target")
+
+    # --- Discount rate ---
+    risk_free_rate = 0.043
+    equity_risk_premium = 0.055
+    beta = _safe_float(profile.get("beta")) or 1.0
+    if beta < 0.3:
+        beta = 1.0
+    default_wacc = risk_free_rate + beta * equity_risk_premium
+    discount_rate = discount_rate_override if discount_rate_override is not None else default_wacc
+
+    # --- Terminal growth ---
+    terminal_growth = terminal_growth_override if terminal_growth_override is not None else 0.025
+    if discount_rate <= terminal_growth:
+        warnings.append("Discount rate must exceed terminal growth — adjusting terminal growth down")
+        terminal_growth = discount_rate - 0.01
+
+    # --- Project revenue → FCF ---
+    projected_fcfs = []
+    rev = base_revenue
+
+    if growth_stages:
+        year_counter = 1
+        for stage in growth_stages:
+            stage_rate = stage["rate"]
+            stage_years = stage["years"]
+            for _ in range(stage_years):
+                if year_counter > projection_years:
+                    break
+                rev = rev * (1 + stage_rate)
+                fcf = rev * target_fcf_margin
+                pv = fcf / (1 + discount_rate) ** year_counter
+                projected_fcfs.append({
+                    "year": year_counter,
+                    "revenue": round(rev, 0),
+                    "fcf": round(fcf, 0),
+                    "present_value": round(pv, 0),
+                    "stage_rate": round(stage_rate * 100, 1),
+                })
+                year_counter += 1
+    else:
+        for year in range(1, projection_years + 1):
+            rev = rev * (1 + revenue_growth)
+            fcf = rev * target_fcf_margin
+            pv = fcf / (1 + discount_rate) ** year
+            projected_fcfs.append({
+                "year": year,
+                "revenue": round(rev, 0),
+                "fcf": round(fcf, 0),
+                "present_value": round(pv, 0),
+            })
+
+    # --- Terminal value ---
+    terminal_fcf = projected_fcfs[-1]["fcf"] * (1 + terminal_growth)
+    terminal_value = terminal_fcf / (discount_rate - terminal_growth)
+    terminal_pv = terminal_value / (1 + discount_rate) ** projection_years
+
+    # --- Intrinsic value ---
+    sum_pv_fcfs = sum(p["present_value"] for p in projected_fcfs)
+    enterprise_value = sum_pv_fcfs + terminal_pv
+    equity_value = enterprise_value - net_debt
+    if equity_value <= 0:
+        warnings.append("Equity value negative after subtracting net debt")
+        current_price = _safe_float(profile.get("price"))
+        return {
+            "dcf_price": None, "warnings": warnings, "has_data": True,
+            "current_price": current_price,
+            "assumptions": {
+                "base_revenue": round(base_revenue, 0),
+                "revenue_growth": round(revenue_growth * 100, 2),
+                "target_fcf_margin": round(target_fcf_margin * 100, 2),
+                "discount_rate": round(discount_rate * 100, 2),
+                "terminal_growth": round(terminal_growth * 100, 2),
+                "shares_outstanding": shares,
+                "beta": beta,
+                "hist_rev_growth": round(hist_rev_growth * 100, 1) if hist_rev_growth is not None else None,
+                "hist_median_fcf_margin": round(hist_median_fcf_margin * 100, 1) if hist_median_fcf_margin is not None else None,
+                "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
+                "analyst_num_analysts": analyst_num_analysts,
+            },
+            "projected_fcfs": projected_fcfs,
+            "sensitivity": [],
+        }
+
+    intrinsic_per_share = equity_value / shares
+    current_price = _safe_float(profile.get("price"))
+    upside = None
+    if current_price and current_price > 0:
+        upside = round((intrinsic_per_share / current_price - 1) * 100, 1)
+
+    terminal_pct = (terminal_pv / enterprise_value * 100) if enterprise_value > 0 else 0
+    if terminal_pct > 80:
+        warnings.append(f"Terminal value is {terminal_pct:.0f}% of total — valuation heavily depends on long-term assumptions")
+
+    # --- Sensitivity table (revenue growth × discount rate) ---
+    growth_steps = [revenue_growth + (i - 4) * 0.02 for i in range(9)]
+    growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.50]
+    discount_steps = [discount_rate + (i - 3) * 0.01 for i in range(7)]
+    discount_steps = [d for d in discount_steps if 0.04 <= d <= 0.20]
+
+    sensitivity = []
+    for g in growth_steps:
+        row = {"growth_rate": round(g * 100, 1)}
+        for d in discount_steps:
+            if d <= terminal_growth + 0.005:
+                row[f"{d*100:.1f}%"] = "N/A"
+                continue
+            r = base_revenue
+            pv_sum = 0
+            for yr in range(1, projection_years + 1):
+                r = r * (1 + g)
+                f = r * target_fcf_margin
+                pv_sum += f / (1 + d) ** yr
+            t_fcf = (r * target_fcf_margin) * (1 + terminal_growth)
+            t_val = t_fcf / (d - terminal_growth) if d > terminal_growth else 0
+            t_pv = t_val / (1 + d) ** projection_years
+            ev = pv_sum + t_pv
+            eq = ev - net_debt
+            price = max(eq, 0) / shares
+            row[f"{d*100:.1f}%"] = round(price, 2)
+        sensitivity.append(row)
+
+    return {
+        "dcf_price": round(intrinsic_per_share, 2),
+        "current_price": current_price,
+        "upside_pct": upside,
+        "dcf_mode": "revenue",
+        "assumptions": {
+            "base_revenue": round(base_revenue, 0),
+            "revenue_growth": round(revenue_growth * 100, 2),
+            "target_fcf_margin": round(target_fcf_margin * 100, 2),
+            "discount_rate": round(discount_rate * 100, 2),
+            "terminal_growth": round(terminal_growth * 100, 2),
+            "beta": round(beta, 2),
+            "projection_years": projection_years,
+            "shares_outstanding": shares,
+            "net_debt": round(net_debt, 0),
+            "hist_rev_growth": round(hist_rev_growth * 100, 1) if hist_rev_growth is not None else None,
+            "hist_median_fcf_margin": round(hist_median_fcf_margin * 100, 1) if hist_median_fcf_margin is not None else None,
+            "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
+            "analyst_num_analysts": analyst_num_analysts,
+        },
+        "projected_fcfs": projected_fcfs,
+        "terminal_value": round(terminal_value, 0),
+        "terminal_pv": round(terminal_pv, 0),
+        "terminal_pct": round(terminal_pct, 1),
+        "sensitivity": sensitivity,
+        "sensitivity_discount_rates": [f"{d*100:.1f}%" for d in discount_steps],
+        "warnings": warnings,
+    }
+
+
 def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
                     history_years: int | None = None) -> dict:
     """
