@@ -313,6 +313,23 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 with tab1:
     st.header("Screener Dashboard")
 
+    st.markdown(
+        """**Markets move fast during conflict. This tool helps you keep up.**
+
+When war breaks out, entire sectors reprice overnight — energy, defense, shipping,
+agriculture, airlines. Some surge, some collapse. The problem isn't finding *a* play —
+it's maintaining a clear, systematic view across all of them while the news cycle is screaming.
+
+The Wartime Screener tracks companies disproportionately impacted by conflict, organized
+by industry and thesis. Scan for undervalued tickers, compare fundamentals across peers,
+and stress-test your assumptions with our multi-stage DCF model.
+
+*Start by selecting a universe below, or jump straight to the Ticker Deep Dive tab to
+analyze a specific company.*"""
+    )
+
+    st.divider()
+
     # --- Screener filters (inline) ---
     uni_map = universe_display_map()
     selected_display = st.multiselect(
