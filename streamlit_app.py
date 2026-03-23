@@ -1120,7 +1120,7 @@ with tab2:
                 "summary": summary,
                 "saved_at": str(pd.Timestamp.now()),
             }
-            fpath = tdir / f"Q{quarter}_{year}.json"
+            fpath = tdir / (f"FY_{year}.json" if quarter == 0 else f"Q{quarter}_{year}.json")
             with open(fpath, "w") as f:
                 json.dump(payload, f, indent=2)
 
@@ -1130,7 +1130,7 @@ with tab2:
             if not tdir.exists():
                 return []
             results = []
-            for fpath in sorted(tdir.glob("Q*_*.json"), reverse=True):
+            for fpath in sorted(list(tdir.glob("Q*_*.json")) + list(tdir.glob("FY_*.json")), reverse=True):
                 try:
                     with open(fpath) as f:
                         results.append(json.load(f))
@@ -1140,7 +1140,8 @@ with tab2:
 
         def _load_local_transcript(ticker: str, year: int, quarter: int) -> dict | None:
             """Load a specific locally saved transcript."""
-            fpath = _TRANSCRIPT_DIR / ticker.upper() / f"Q{quarter}_{year}.json"
+            _fname = f"FY_{year}.json" if quarter == 0 else f"Q{quarter}_{year}.json"
+            fpath = _TRANSCRIPT_DIR / ticker.upper() / _fname
             if fpath.exists():
                 try:
                     with open(fpath) as f:
@@ -1164,12 +1165,13 @@ with tab2:
                 if not _available_dates:
                     _available_dates = []
                 for _lt in _local_transcripts:
-                    _lt_period = f"Q{_lt['quarter']} {_lt['year']}"
+                    _lt_q = _lt.get("quarter", 1)
+                    _lt_period = f"FY {_lt['year']}" if _lt_q == 0 else f"Q{_lt_q} {_lt['year']}"
                     if _lt_period not in _existing_periods:
                         _available_dates.insert(0, {
                             "period": _lt_period,
                             "year": _lt["year"],
-                            "quarter": _lt["quarter"],
+                            "quarter": _lt_q,
                             "source": "local",
                         })
                         _existing_periods.add(_lt_period)
@@ -1180,7 +1182,7 @@ with tab2:
                     _tc_cols = st.columns([3, 1])
                     with _tc_cols[0]:
                         _selected_quarter = st.selectbox(
-                            "Select Quarter",
+                            "Select Period",
                             options=_quarter_options,
                             index=0,
                             key="transcript_quarter",
@@ -1323,14 +1325,17 @@ with tab2:
 
                 # Manual transcript paste section
                 st.markdown("---")
-                st.markdown("**📋 Paste a Transcript Manually**")
-                st.caption("Paste raw earnings call text from any source. Claude will summarize it and save it for future use.")
+                st.markdown("**📋 Paste a Transcript or Report Manually**")
+                st.caption("Paste earnings call text or annual report commentary from any source. Claude will summarize it and save it for future use.")
 
                 with st.form(key="manual_transcript_form"):
-                    _paste_cols = st.columns([1, 1, 4])
+                    _paste_cols = st.columns([1, 1, 1, 3])
                     with _paste_cols[0]:
-                        _paste_quarter = st.selectbox("Quarter", options=[1, 2, 3, 4], index=0, key="paste_quarter")
+                        _paste_period_type = st.selectbox("Period", options=["Quarterly", "Annual"], index=0, key="paste_period_type")
                     with _paste_cols[1]:
+                        _paste_quarter = st.selectbox("Quarter", options=[1, 2, 3, 4], index=0, key="paste_quarter",
+                                                       disabled=(_paste_period_type == "Annual"))
+                    with _paste_cols[2]:
                         _paste_year = st.number_input("Year", min_value=2015, max_value=2030, value=2025, key="paste_year")
                     _manual_text = st.text_area(
                         "Paste transcript text here",
@@ -1344,19 +1349,21 @@ with tab2:
                     if not _anthropic_configured():
                         st.warning("⚠️ ANTHROPIC_API_KEY not set in .env — transcript summarization unavailable.")
                     else:
-                        with st.spinner("Analyzing pasted transcript with Claude..."):
+                        _effective_quarter = 0 if _paste_period_type == "Annual" else int(_paste_quarter)
+                        _period_label = f"FY {_paste_year}" if _effective_quarter == 0 else f"Q{_effective_quarter} {_paste_year}"
+                        with st.spinner(f"Analyzing {_period_label} with Claude..."):
                             _manual_parsed = summarize_transcript(
                                 _manual_text.strip(),
                                 ticker=analysis["ticker"],
                                 year=int(_paste_year),
-                                quarter=int(_paste_quarter),
+                                quarter=_effective_quarter,
                                 skip_cache=True,
                             )
                         # Save to disk
                         _save_local_transcript(
                             analysis["ticker"],
                             int(_paste_year),
-                            int(_paste_quarter),
+                            _effective_quarter,
                             _manual_text.strip(),
                             _manual_parsed,
                         )
@@ -1364,7 +1371,7 @@ with tab2:
                             "parsed": _manual_parsed,
                             "ticker": analysis["ticker"],
                         }
-                        st.success(f"Saved Q{_paste_quarter} {_paste_year} transcript for {analysis['ticker']}. "
+                        st.success(f"Saved {_period_label} transcript for {analysis['ticker']}. "
                                    "It will now appear in the quarter selector.")
                 elif _manual_submit and _manual_text and len(_manual_text.strip()) <= 100:
                     st.warning("Transcript text is too short. Paste at least a few paragraphs for meaningful analysis.")
