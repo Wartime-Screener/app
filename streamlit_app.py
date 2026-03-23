@@ -703,6 +703,15 @@ with tab2:
 
         # Metrics table
         st.subheader("Fundamental Metrics")
+        _filing_period = analysis.get("latest_filing_period")
+        _filing_date = analysis.get("latest_filing_date")
+        if _filing_period or _filing_date:
+            _parts = []
+            if _filing_period:
+                _parts.append(f"**{_filing_period}**")
+            if _filing_date:
+                _parts.append(f"filed {_filing_date}")
+            st.caption(f"📅 Based on most recent annual filing: {' — '.join(_parts)}")
         metrics = analysis.get("metrics", {})
 
         if metrics:
