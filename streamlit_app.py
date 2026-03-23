@@ -91,6 +91,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# --- Global CSS — larger expander/section titles ---
+st.markdown("""
+<style>
+/* Make expander titles larger and bolder */
+details summary span p {
+    font-size: 1.25rem !important;
+    font-weight: 600 !important;
+}
+/* Make st.subheader slightly larger */
+[data-testid="stSubheader"] {
+    font-size: 1.4rem !important;
+    font-weight: 700 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Load Streamlit Cloud secrets into environment variables if available
 try:
     _secrets_path = Path.home() / ".streamlit" / "secrets.toml"
@@ -904,7 +920,7 @@ with tab2:
 
             # EPS history table
             if eps_history:
-                with st.expander("EPS History", expanded=False):
+                with st.expander("EPS History", expanded=True):
                     import pandas as pd
                     eps_df = pd.DataFrame([
                         {"Year": d["year"], "EPS": round(d["eps"], 2) if d["eps"] is not None else None}
@@ -914,7 +930,7 @@ with tab2:
                         st.dataframe(eps_df, use_container_width=True, hide_index=True)
 
         # Revenue Segmentation — product and geographic breakdown
-        with st.expander("Revenue Segmentation", expanded=True):
+        with st.expander("Revenue Segmentation", expanded=False):
             prod_seg = fmp.get_revenue_product_segmentation(analysis["ticker"])
             geo_seg = fmp.get_revenue_geographic_segmentation(analysis["ticker"])
 
@@ -1015,7 +1031,7 @@ with tab2:
                     _build_seg_chart_and_table(geo_seg, "Geographic Segmentation")
 
         # Insider Trading — recent Form 4 filings
-        with st.expander("Insider Trading", expanded=True):
+        with st.expander("Insider Trading", expanded=False):
             insider_trades = fmp.get_insider_trades(analysis["ticker"], limit=50)
             insider_stats = fmp.get_insider_trade_statistics(analysis["ticker"])
 
@@ -1152,7 +1168,7 @@ with tab2:
 
         @st.fragment
         def _transcript_fragment():
-            with st.expander("Earnings Calls & Annual Reports — Management Commentary", expanded=False):
+            with st.expander("Earnings Calls & Annual Reports — Management Commentary", expanded=True):
                 from datetime import datetime as _dt
                 from src.transcript_summarizer import summarize_transcript, is_configured as _anthropic_configured
 
@@ -1819,7 +1835,7 @@ with tab2:
             _dcf_fragment()
 
         elif dcf.get("warnings"):
-            with st.expander("DCF Valuation", expanded=False):
+            with st.expander("DCF Valuation", expanded=True):
                 for w in dcf.get("warnings", []):
                     st.info(w)
 
