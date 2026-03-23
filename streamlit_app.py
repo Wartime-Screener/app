@@ -2608,44 +2608,33 @@ with tab7:
                 unsafe_allow_html=True,
             )
 
-        # Add new note
-        st.caption("Use **Tab** to indent (or start line with spaces). "
-                   "Level 1 = bullets, Level 2 = letters, Level 3 = roman numerals.")
+        # Add new note — one line at a time with level picker
+        st.caption("Add a thought, pick its depth, and hit Save. "
+                   "**•** = main point, **a.** = supporting detail, **i.** = sub-detail.")
 
         with st.form(key="add_note_form", clear_on_submit=True):
-            note_cols = st.columns([5, 1])
-            with note_cols[0]:
-                new_note_text = st.text_area(
-                    "Add notes",
-                    height=120,
-                    placeholder="Type your thoughts...\n  Indented = sub-point (a, b, c)\n    Double-indent = sub-sub-point (i, ii, iii)",
+            note_input_cols = st.columns([1, 5, 1])
+            with note_input_cols[0]:
+                note_level = st.selectbox(
+                    "Depth",
+                    options=[0, 1, 2],
+                    format_func=lambda x: {0: "• Main", 1: "  a. Detail", 2: "    i. Sub"}[x],
+                    key="note_level_input",
+                )
+            with note_input_cols[1]:
+                new_note_text = st.text_input(
+                    "Note",
+                    placeholder="Type your thought here...",
                     key="new_note_input",
                     label_visibility="collapsed",
                 )
-            with note_cols[1]:
-                st.write("")
+            with note_input_cols[2]:
                 save_note = st.form_submit_button("💾 Save", use_container_width=True)
 
         if save_note and new_note_text.strip():
-            # Parse indentation levels from the text
-            new_entries = []
-            for line in new_note_text.split("\n"):
-                if not line.strip():
-                    continue
-                # Count leading spaces/tabs to determine level
-                stripped = line.lstrip()
-                leading = len(line) - len(stripped)
-                if line.startswith("\t\t") or leading >= 8:
-                    level = 2
-                elif line.startswith("\t") or leading >= 4:
-                    level = 1
-                else:
-                    level = 0
-                new_entries.append({"text": stripped, "level": level})
-
-            updated_notes = structured_notes + new_entries
+            new_entry = {"text": new_note_text.strip(), "level": note_level}
+            updated_notes = structured_notes + [new_entry]
             update_position_notes(note_pos["id"], updated_notes)
-            st.success("Notes saved!")
             st.rerun()
 
         # Option to clear all notes for this position
