@@ -2630,39 +2630,39 @@ with tab7:
                             st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            st.caption("Press **Enter** to save. Start with **~** to indent, **~~** to double-indent.")
+            st.caption("Start a line with **~** to indent (a, b, c) or **~~** to double-indent (aa, bb, cc). "
+                       "Each line becomes a separate note.")
 
-            # Check if a note was submitted on previous run
-            _pending_text = st.session_state.get("_note_pending_text", "")
-            if _pending_text.strip():
-                # Parse ~ prefix for indent level
-                text = _pending_text
-                if text.startswith("~~"):
-                    level = 2
-                    text = text[2:].lstrip()
-                elif text.startswith("~"):
-                    level = 1
-                    text = text[1:].lstrip()
-                else:
-                    level = 0
-                if text.strip():
-                    new_entry = {"text": text.strip(), "level": level}
-                    updated_notes = structured_notes + [new_entry]
+            with st.form(key="add_note_form", clear_on_submit=True):
+                new_note_text = st.text_area(
+                    "Note",
+                    height=150,
+                    placeholder="Type your thoughts here...\n~supporting detail\n~~sub-detail\n\nEach line saves as a separate note.",
+                    key="note_text_input",
+                    label_visibility="collapsed",
+                )
+                save_note = st.form_submit_button("💾 Save Notes", use_container_width=True)
+
+            if save_note and new_note_text.strip():
+                new_entries = []
+                for line in new_note_text.split("\n"):
+                    if not line.strip():
+                        continue
+                    text = line
+                    if text.startswith("~~"):
+                        level = 2
+                        text = text[2:].lstrip()
+                    elif text.startswith("~"):
+                        level = 1
+                        text = text[1:].lstrip()
+                    else:
+                        level = 0
+                    if text.strip():
+                        new_entries.append({"text": text.strip(), "level": level})
+                if new_entries:
+                    updated_notes = structured_notes + new_entries
                     update_position_notes(note_pos["id"], updated_notes)
-                st.session_state["_note_pending_text"] = ""
-                st.session_state["note_text_input"] = ""
-                st.rerun()
-
-            new_note_text = st.text_input(
-                "Note",
-                placeholder="Type here... ( ~ = indent, ~~ = double indent )",
-                key="note_text_input",
-                label_visibility="collapsed",
-            )
-
-            if new_note_text.strip():
-                st.session_state["_note_pending_text"] = new_note_text
-                st.rerun()
+                    st.rerun()
 
             if structured_notes:
                 if st.button("🗑️ Clear all notes", key="clear_notes_btn"):
