@@ -952,6 +952,19 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         analyst_estimates=analyst_estimates,
     )
 
+    # Determine the most recent filing period for display context
+    _latest_filing_date = None
+    _latest_filing_period = None
+    if income:
+        _stmt = income[0]
+        _latest_filing_date = _stmt.get("fillingDate") or _stmt.get("acceptedDate") or _stmt.get("date")
+        _cal_year = _stmt.get("calendarYear", "")
+        _period = _stmt.get("period", "")  # e.g. "FY", "Q3"
+        if _cal_year and _period:
+            _latest_filing_period = f"{_period} {_cal_year}"
+        elif _cal_year:
+            _latest_filing_period = f"FY {_cal_year}"
+
     return {
         "ticker": ticker,
         "company_name": company_name,
@@ -969,6 +982,8 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         "income_statements": income,
         "balance_sheets": balance_sheet,
         "analyst_estimates": analyst_estimates,
+        "latest_filing_date": _latest_filing_date,
+        "latest_filing_period": _latest_filing_period,
     }
 
 

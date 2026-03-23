@@ -703,6 +703,15 @@ with tab2:
 
         # Metrics table
         st.subheader("Fundamental Metrics")
+        _filing_period = analysis.get("latest_filing_period")
+        _filing_date = analysis.get("latest_filing_date")
+        if _filing_period or _filing_date:
+            _parts = []
+            if _filing_period:
+                _parts.append(f"**{_filing_period}**")
+            if _filing_date:
+                _parts.append(f"filed {_filing_date}")
+            st.caption(f"📅 Based on most recent annual filing: {' — '.join(_parts)}")
         metrics = analysis.get("metrics", {})
 
         if metrics:
@@ -2618,15 +2627,23 @@ with tab7:
                     line-height: 1.8; color: #e0e0e0;">""",
                     unsafe_allow_html=True,
                 )
+                # Use session_state flag to handle deletion without shifting keys
+                _del_key = st.session_state.get("_note_to_delete", None)
+                if _del_key is not None:
+                    st.session_state.pop("_note_to_delete", None)
+                    if 0 <= _del_key < len(structured_notes):
+                        del structured_notes[_del_key]
+                        update_position_notes(note_pos["id"], structured_notes)
+                        st.rerun()
+
                 for note_idx_display, (orig_idx, line_html) in enumerate(_display_lines):
                     dcol1, dcol2 = st.columns([20, 1])
                     with dcol1:
                         st.markdown(line_html, unsafe_allow_html=True)
                     with dcol2:
-                        if st.button("✕", key=f"del_note_{note_pos['id']}_{orig_idx}",
+                        if st.button("✕", key=f"delnote_{note_pos['id']}_{note_idx_display}",
                                      help="Delete this note"):
-                            del structured_notes[orig_idx]
-                            update_position_notes(note_pos["id"], structured_notes)
+                            st.session_state["_note_to_delete"] = orig_idx
                             st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
