@@ -2550,172 +2550,137 @@ with tab7:
         st.divider()
 
         # ---- Research Notes ---- #
-        st.subheader("📝 Research Notes")
+        @st.fragment
+        def _research_notes_fragment():
+            st.subheader("📝 Research Notes")
 
-        # Helper: convert structured notes list to pretty markdown
-        def _notes_to_markdown(notes_list: list) -> str:
-            """Convert [{text, level}, ...] to hierarchical markdown."""
-            _markers = {0: "•", 1: "abcdefghijklmnopqrstuvwxyz", 2: None}
             _roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
                        "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
-            counters = {0: 0, 1: 0, 2: 0}
-            lines = []
-            for item in notes_list:
-                lvl = item.get("level", 0)
-                txt = item.get("text", "")
-                if not txt.strip():
-                    continue
-                # Reset lower-level counters when a higher level appears
-                for l in range(lvl + 1, 3):
-                    counters[l] = 0
-                indent = "    " * lvl
-                if lvl == 0:
-                    marker = "•"
-                elif lvl == 1:
-                    idx = counters[1] % 26
-                    marker = f"{chr(97 + idx)}."
-                    counters[1] += 1
+
+            # Select which position to add notes to
+            note_options = [f"{p['ticker']} — {p['buy_date']} ({p['thesis_tag']})" for p in positions]
+            note_selection = st.selectbox("Select position", note_options, key="note_pos_select")
+            note_idx = note_options.index(note_selection)
+            note_pos = positions[note_idx]
+
+            # Get existing notes (migrate from old string format if needed)
+            existing_notes = note_pos.get("notes", "")
+            if isinstance(existing_notes, str):
+                if existing_notes.strip():
+                    structured_notes = [{"text": existing_notes, "level": 0}]
                 else:
-                    idx = counters[2] % len(_roman)
-                    marker = f"{_roman[idx]}."
-                    counters[2] += 1
-                lines.append(f"{indent}{marker} {txt}")
-            return "\n".join(lines)
-
-        # Select which position to add notes to
-        note_options = [f"{p['ticker']} — {p['buy_date']} ({p['thesis_tag']})" for p in positions]
-        note_selection = st.selectbox("Select position", note_options, key="note_pos_select")
-        note_idx = note_options.index(note_selection)
-        note_pos = positions[note_idx]
-
-        # Get existing notes (migrate from old string format if needed)
-        existing_notes = note_pos.get("notes", "")
-        if isinstance(existing_notes, str):
-            # Old format — convert to structured list
-            if existing_notes.strip():
-                structured_notes = [{"text": existing_notes, "level": 0}]
+                    structured_notes = []
             else:
-                structured_notes = []
-        else:
-            structured_notes = existing_notes if existing_notes else []
+                structured_notes = existing_notes if existing_notes else []
 
-        # Display existing notes with per-line delete buttons
-        if structured_notes:
-            # Build the markers for display
-            _del_roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
-                          "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
-            _del_counters = {0: 0, 1: 0, 2: 0}
-            _display_lines = []
-            for idx, item in enumerate(structured_notes):
-                lvl = item.get("level", 0)
-                txt = item.get("text", "")
-                if not txt.strip():
-                    continue
-                for l in range(lvl + 1, 3):
-                    _del_counters[l] = 0
-                indent = "&nbsp;" * (8 * lvl)
-                if lvl == 0:
-                    marker = "•"
-                elif lvl == 1:
-                    c = _del_counters[1] % 26
-                    marker = f"{chr(97 + c)}."
-                    _del_counters[1] += 1
+            # Display existing notes with per-line delete buttons
+            if structured_notes:
+                _del_counters = {0: 0, 1: 0, 2: 0}
+                _display_lines = []
+                for idx, item in enumerate(structured_notes):
+                    lvl = item.get("level", 0)
+                    txt = item.get("text", "")
+                    if not txt.strip():
+                        continue
+                    for l in range(lvl + 1, 3):
+                        _del_counters[l] = 0
+                    indent = "&nbsp;" * (8 * lvl)
+                    if lvl == 0:
+                        marker = "•"
+                    elif lvl == 1:
+                        c = _del_counters[1] % 26
+                        marker = f"{chr(97 + c)}."
+                        _del_counters[1] += 1
+                    else:
+                        c = _del_counters[2] % len(_roman)
+                        marker = f"{_roman[c]}."
+                        _del_counters[2] += 1
+                    _display_lines.append((idx, f"{indent}{marker} {txt}"))
+
+                st.markdown(
+                    """<div style="background-color: #1e1e2e; border: 1px solid #444;
+                    border-radius: 8px; padding: 16px; margin-bottom: 8px;
+                    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
+                    line-height: 1.8; color: #e0e0e0;">""",
+                    unsafe_allow_html=True,
+                )
+                for note_idx_display, (orig_idx, line_html) in enumerate(_display_lines):
+                    dcol1, dcol2 = st.columns([20, 1])
+                    with dcol1:
+                        st.markdown(line_html, unsafe_allow_html=True)
+                    with dcol2:
+                        if st.button("✕", key=f"del_note_{note_pos['id']}_{orig_idx}",
+                                     help="Delete this note"):
+                            del structured_notes[orig_idx]
+                            update_position_notes(note_pos["id"], structured_notes)
+                            st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # Compute next markers for the dropdown labels
+            def _next_marker(notes_list, level):
+                count = 0
+                for item in reversed(notes_list):
+                    if item.get("level", 0) == level:
+                        count += 1
+                    elif item.get("level", 0) < level:
+                        break
+                if level == 0:
+                    return "•"
+                elif level == 1:
+                    return f"{chr(97 + count % 26)}."
                 else:
-                    c = _del_counters[2] % len(_del_roman)
-                    marker = f"{_del_roman[c]}."
-                    _del_counters[2] += 1
-                _display_lines.append((idx, f"{indent}{marker} {txt}"))
+                    return f"{_roman[count % len(_roman)]}."
 
-            st.markdown(
-                """<div style="background-color: #1e1e2e; border: 1px solid #444;
-                border-radius: 8px; padding: 16px; margin-bottom: 8px;
-                font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
-                line-height: 1.8; color: #e0e0e0;">""",
-                unsafe_allow_html=True,
-            )
-            for note_idx_display, (orig_idx, line_html) in enumerate(_display_lines):
-                dcol1, dcol2 = st.columns([20, 1])
-                with dcol1:
-                    st.markdown(line_html, unsafe_allow_html=True)
-                with dcol2:
-                    if st.button("✕", key=f"del_note_{note_pos['id']}_{orig_idx}",
-                                 help="Delete this note"):
-                        del structured_notes[orig_idx]
-                        update_position_notes(note_pos["id"], structured_notes)
-                        st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+            _next_main = "•"
+            _next_detail = _next_marker(structured_notes, 1)
+            _next_sub = _next_marker(structured_notes, 2)
 
-        # Add new note — type and press Enter to save
-        _roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
-                   "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
+            st.caption("Type a thought and press **Enter** to save it. "
+                       "Change depth for sub-points.")
 
-        def _next_marker(notes_list: list, level: int) -> str:
-            """Compute the next sequential marker for a given level."""
-            # Count how many items at this level follow the last higher-level item
-            count = 0
-            for item in reversed(notes_list):
-                if item.get("level", 0) == level:
-                    count += 1
-                elif item.get("level", 0) < level:
-                    break  # stop counting at the parent
-            if level == 0:
-                return "•"
-            elif level == 1:
-                return f"{chr(97 + count % 26)}."
-            else:
-                return f"{_roman[count % len(_roman)]}."
-
-        # Compute next markers for the dropdown labels
-        _next_main = "•"
-        _next_detail = _next_marker(structured_notes, 1)
-        _next_sub = _next_marker(structured_notes, 2)
-
-        st.caption("Type a thought and press **Enter** to save it. "
-                   "Change depth for sub-points.")
-
-        # Check if a note was submitted on previous run (text_input triggers rerun on Enter)
-        _pending_text = st.session_state.get("_note_pending_text", "")
-        _pending_level = st.session_state.get("_note_pending_level", 0)
-        if _pending_text.strip():
-            new_entry = {"text": _pending_text.strip(), "level": _pending_level}
-            updated_notes = structured_notes + [new_entry]
-            update_position_notes(note_pos["id"], updated_notes)
-            st.session_state["_note_pending_text"] = ""
-            st.session_state["note_text_input"] = ""  # clear the text input
-            st.rerun()
-
-        note_input_cols = st.columns([1, 5])
-        with note_input_cols[0]:
-            note_level = st.selectbox(
-                "Depth",
-                options=[0, 1, 2],
-                format_func=lambda x: {
-                    0: f"{_next_main} Main",
-                    1: f"   {_next_detail} Detail",
-                    2: f"      {_next_sub} Sub",
-                }[x],
-                key="note_level_input",
-            )
-        with note_input_cols[1]:
-            new_note_text = st.text_input(
-                "Note",
-                placeholder="Type your thought and press Enter...",
-                key="note_text_input",
-                label_visibility="collapsed",
-            )
-
-        # If user pressed Enter (text_input has value and we haven't processed it)
-        if new_note_text.strip():
-            st.session_state["_note_pending_text"] = new_note_text
-            st.session_state["_note_pending_level"] = note_level
-            st.rerun()
-
-        # Option to clear all notes for this position
-        if structured_notes:
-            if st.button("🗑️ Clear all notes for this position", key="clear_notes_btn"):
-                update_position_notes(note_pos["id"], [])
-                st.success("Notes cleared.")
+            # Check if a note was submitted on previous run
+            _pending_text = st.session_state.get("_note_pending_text", "")
+            _pending_level = st.session_state.get("_note_pending_level", 0)
+            if _pending_text.strip():
+                new_entry = {"text": _pending_text.strip(), "level": _pending_level}
+                updated_notes = structured_notes + [new_entry]
+                update_position_notes(note_pos["id"], updated_notes)
+                st.session_state["_note_pending_text"] = ""
+                st.session_state["note_text_input"] = ""
                 st.rerun()
+
+            note_input_cols = st.columns([1, 5])
+            with note_input_cols[0]:
+                note_level = st.selectbox(
+                    "Depth",
+                    options=[0, 1, 2],
+                    format_func=lambda x: {
+                        0: f"{_next_main} Main",
+                        1: f"   {_next_detail} Detail",
+                        2: f"      {_next_sub} Sub",
+                    }[x],
+                    key="note_level_input",
+                )
+            with note_input_cols[1]:
+                new_note_text = st.text_input(
+                    "Note",
+                    placeholder="Type your thought and press Enter...",
+                    key="note_text_input",
+                    label_visibility="collapsed",
+                )
+
+            if new_note_text.strip():
+                st.session_state["_note_pending_text"] = new_note_text
+                st.session_state["_note_pending_level"] = note_level
+                st.rerun()
+
+            if structured_notes:
+                if st.button("🗑️ Clear all notes for this position", key="clear_notes_btn"):
+                    update_position_notes(note_pos["id"], [])
+                    st.success("Notes cleared.")
+                    st.rerun()
+
+        _research_notes_fragment()
 
         st.divider()
 
