@@ -1482,6 +1482,9 @@ with tab2:
                             analyst_label += f"  ({analyst_num} analysts)"
                         st.info(analyst_label)
 
+                    # Initialize dcf_display so Valuation section always has something to read
+                    dcf_display = _dcf or {}
+
                     if dcf_mode == "FCF" and not dcf_has_sliders:
                         # FCF mode selected but no usable FCF data
                         st.warning(
