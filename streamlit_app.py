@@ -1105,6 +1105,50 @@ with tab2:
                                      height=min(len(trade_rows) * 35 + 38, 500))
 
         # Earnings Call Transcript — Management Commentary
+        # --- Local transcript save/load helpers ---
+        _TRANSCRIPT_DIR = Path(__file__).parent / "data" / "transcripts"
+
+        def _save_local_transcript(ticker: str, year: int, quarter: int, content: str, summary: dict):
+            """Save a pasted transcript and its summary to disk."""
+            tdir = _TRANSCRIPT_DIR / ticker.upper()
+            tdir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "ticker": ticker.upper(),
+                "year": year,
+                "quarter": quarter,
+                "content": content,
+                "summary": summary,
+                "saved_at": str(pd.Timestamp.now()),
+            }
+            fpath = tdir / f"Q{quarter}_{year}.json"
+            with open(fpath, "w") as f:
+                json.dump(payload, f, indent=2)
+
+        def _load_local_transcripts(ticker: str) -> list[dict]:
+            """Load all locally saved transcripts for a ticker."""
+            tdir = _TRANSCRIPT_DIR / ticker.upper()
+            if not tdir.exists():
+                return []
+            results = []
+            for fpath in sorted(tdir.glob("Q*_*.json"), reverse=True):
+                try:
+                    with open(fpath) as f:
+                        results.append(json.load(f))
+                except Exception:
+                    continue
+            return results
+
+        def _load_local_transcript(ticker: str, year: int, quarter: int) -> dict | None:
+            """Load a specific locally saved transcript."""
+            fpath = _TRANSCRIPT_DIR / ticker.upper() / f"Q{quarter}_{year}.json"
+            if fpath.exists():
+                try:
+                    with open(fpath) as f:
+                        return json.load(f)
+                except Exception:
+                    return None
+            return None
+
         @st.fragment
         def _transcript_fragment():
             with st.expander("Earnings Call — Management Commentary", expanded=False):
@@ -1113,6 +1157,22 @@ with tab2:
 
                 # Fetch available transcript dates from FMP
                 _available_dates = fmp.get_earning_call_transcript_dates(analysis["ticker"], limit=20)
+
+                # Merge locally saved transcripts into available dates
+                _local_transcripts = _load_local_transcripts(analysis["ticker"])
+                _existing_periods = {d["period"] for d in _available_dates} if _available_dates else set()
+                if not _available_dates:
+                    _available_dates = []
+                for _lt in _local_transcripts:
+                    _lt_period = f"Q{_lt['quarter']} {_lt['year']}"
+                    if _lt_period not in _existing_periods:
+                        _available_dates.insert(0, {
+                            "period": _lt_period,
+                            "year": _lt["year"],
+                            "quarter": _lt["quarter"],
+                            "source": "local",
+                        })
+                        _existing_periods.add(_lt_period)
 
                 if _available_dates:
                     _quarter_options = [d["period"] for d in _available_dates]
@@ -1143,26 +1203,38 @@ with tab2:
                         _load_clicked = st.form_submit_button("Load Transcript")
 
                     if _load_clicked:
-                        with st.spinner(f"Fetching {analysis['ticker']} {_selected_quarter} transcript..."):
-                            _transcript = fmp.get_earning_call_transcript(analysis["ticker"], _ty, _tq)
-                        if _transcript and _transcript.get("content"):
-                            with st.spinner("Analyzing transcript with Claude..."):
-                                _parsed = summarize_transcript(
-                                    _transcript["content"],
-                                    ticker=analysis["ticker"],
-                                    year=_ty,
-                                    quarter=_tq,
-                                )
+                        # Check local saved transcripts first
+                        _local = _load_local_transcript(analysis["ticker"], _ty, _tq)
+                        if _local:
                             st.session_state["transcript_result"] = {
-                                "parsed": _parsed,
+                                "parsed": _local.get("summary", {}),
                                 "ticker": analysis["ticker"],
                                 "quarter": _selected_quarter,
-                                "date": _transcript.get("date", ""),
-                                "content": _transcript["content"],
+                                "date": _local.get("saved_at", ""),
+                                "content": _local.get("content", ""),
+                                "source": "local",
                             }
                         else:
-                            st.session_state["transcript_result"] = None
-                            st.warning(f"No transcript available for {analysis['ticker']} {_selected_quarter}. This may be due to limited coverage for smaller companies or the quarter hasn't reported yet.")
+                            with st.spinner(f"Fetching {analysis['ticker']} {_selected_quarter} transcript..."):
+                                _transcript = fmp.get_earning_call_transcript(analysis["ticker"], _ty, _tq)
+                            if _transcript and _transcript.get("content"):
+                                with st.spinner("Analyzing transcript with Claude..."):
+                                    _parsed = summarize_transcript(
+                                        _transcript["content"],
+                                        ticker=analysis["ticker"],
+                                        year=_ty,
+                                        quarter=_tq,
+                                    )
+                                st.session_state["transcript_result"] = {
+                                    "parsed": _parsed,
+                                    "ticker": analysis["ticker"],
+                                    "quarter": _selected_quarter,
+                                    "date": _transcript.get("date", ""),
+                                    "content": _transcript["content"],
+                                }
+                            else:
+                                st.session_state["transcript_result"] = None
+                                st.warning(f"No transcript available for {analysis['ticker']} {_selected_quarter}. This may be due to limited coverage for smaller companies or the quarter hasn't reported yet.")
 
                     # Display cached transcript result
                     _tr = st.session_state.get("transcript_result")
@@ -1214,7 +1286,8 @@ with tab2:
                             st.warning("Could not extract management commentary from this transcript.")
 
                         if _parsed.get("source") == "claude":
-                            st.caption("✨ Summarized by Claude Haiku  ·  Cached for 90 days")
+                            _src_label = "📁 Saved locally" if _tr.get("source") == "local" else "Cached for 90 days"
+                            st.caption(f"✨ Summarized by Claude Haiku  ·  {_src_label}")
 
                         # Optionally show full transcript
                         if _show_full:
@@ -1251,16 +1324,21 @@ with tab2:
                 # Manual transcript paste section
                 st.markdown("---")
                 st.markdown("**📋 Paste a Transcript Manually**")
-                st.caption("Paste raw earnings call text from any source and Claude will summarize it.")
+                st.caption("Paste raw earnings call text from any source. Claude will summarize it and save it for future use.")
 
                 with st.form(key="manual_transcript_form"):
+                    _paste_cols = st.columns([1, 1, 4])
+                    with _paste_cols[0]:
+                        _paste_quarter = st.selectbox("Quarter", options=[1, 2, 3, 4], index=0, key="paste_quarter")
+                    with _paste_cols[1]:
+                        _paste_year = st.number_input("Year", min_value=2015, max_value=2030, value=2025, key="paste_year")
                     _manual_text = st.text_area(
                         "Paste transcript text here",
                         height=200,
                         key="manual_transcript_text",
                         placeholder="Paste the full or partial earnings call transcript here...",
                     )
-                    _manual_submit = st.form_submit_button("📝 Summarize with Claude")
+                    _manual_submit = st.form_submit_button("📝 Summarize & Save")
 
                 if _manual_submit and _manual_text and len(_manual_text.strip()) > 100:
                     if not _anthropic_configured():
@@ -1270,14 +1348,24 @@ with tab2:
                             _manual_parsed = summarize_transcript(
                                 _manual_text.strip(),
                                 ticker=analysis["ticker"],
-                                year=0,
-                                quarter=0,
+                                year=int(_paste_year),
+                                quarter=int(_paste_quarter),
                                 skip_cache=True,
                             )
+                        # Save to disk
+                        _save_local_transcript(
+                            analysis["ticker"],
+                            int(_paste_year),
+                            int(_paste_quarter),
+                            _manual_text.strip(),
+                            _manual_parsed,
+                        )
                         st.session_state["manual_transcript_result"] = {
                             "parsed": _manual_parsed,
                             "ticker": analysis["ticker"],
                         }
+                        st.success(f"Saved Q{_paste_quarter} {_paste_year} transcript for {analysis['ticker']}. "
+                                   "It will now appear in the quarter selector.")
                 elif _manual_submit and _manual_text and len(_manual_text.strip()) <= 100:
                     st.warning("Transcript text is too short. Paste at least a few paragraphs for meaningful analysis.")
 
