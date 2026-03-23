@@ -324,7 +324,7 @@ The Wartime Screener tracks companies disproportionately impacted by conflict, o
 by industry and thesis. Scan for undervalued tickers, compare fundamentals across peers,
 and stress-test your assumptions with our multi-stage DCF model.
 
-*Start by selecting a universe below, or jump straight to the Ticker Deep Dive tab to
+*Start by selecting an industry below, or jump straight to the Ticker Deep Dive tab to
 analyze a specific company.*"""
     )
 
@@ -333,10 +333,10 @@ analyze a specific company.*"""
     # --- Screener filters (inline) ---
     uni_map = universe_display_map()
     selected_display = st.multiselect(
-        "Select Universes",
+        "Select Industries",
         options=sorted(uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
         default=[],
-        help="Choose which sector universes to scan. ⚠️ = inverse plays (sectors likely hurt by conflict).",
+        help="Choose which industries to scan. ⚠️ = inverse plays (sectors likely hurt by conflict).",
     )
     selected_universes = [uni_map[d] for d in selected_display]
 
@@ -374,11 +374,11 @@ analyze a specific company.*"""
     _left, _center, _right = st.columns([2, 1, 2])
     col_export = _right  # export button goes on the right after results load
     with _center:
-        scan_clicked = st.button("Scan Selected Universes", type="primary", use_container_width=True)
+        scan_clicked = st.button("Scan Selected Industries", type="primary", use_container_width=True)
 
     if scan_clicked:
         if not selected_universes:
-            st.warning("Please select at least one universe to scan.")
+            st.warning("Please select at least one industry to scan.")
         else:
             progress_bar = st.progress(0, text="Starting scan...")
             status_text = st.empty()
@@ -387,7 +387,7 @@ analyze a specific company.*"""
                 pct = current / total
                 progress_bar.progress(pct, text=f"Analyzing {ticker} ({current}/{total})")
 
-            with st.spinner("Scanning universes..."):
+            with st.spinner("Scanning industries..."):
                 results = scan_all_universes(
                     fmp_client=fmp,
                     tradier_client=tradier,
@@ -527,7 +527,7 @@ analyze a specific company.*"""
             )
     else:
         st.markdown(
-            "<p style='text-align:center; color:gray;'>Select universes above and click <b>Scan</b> to begin.</p>",
+            "<p style='text-align:center; color:gray;'>Select industries above and click <b>Scan</b> to begin.</p>",
             unsafe_allow_html=True,
         )
 
@@ -557,10 +557,10 @@ with tab2:
                 continue
 
     dd_display = st.multiselect(
-        "Select Universes",
+        "Select Industries",
         options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
         default=[],
-        help="Choose one or more universes to load tickers from. ⚠️ = inverse plays.",
+        help="Choose one or more industries to load tickers from. ⚠️ = inverse plays.",
         key="dd_universes",
     )
     dd_universes = [dd_uni_map[d] for d in dd_display]
@@ -1736,10 +1736,10 @@ with tab3:
     # Universe selector — pick which universes to draw tickers from
     rc_uni_map = universe_display_map()
     rc_display = st.multiselect(
-        "Select Universes",
+        "Select Industries",
         options=sorted(rc_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
         default=[],
-        help="Choose one or more universes to load tickers from. ⚠️ = inverse plays.",
+        help="Choose one or more industries to load tickers from. ⚠️ = inverse plays.",
         key="rc_universes",
     )
 
@@ -1880,7 +1880,7 @@ with tab4:
     else:
         bs_uni_map = universe_display_map()
         bs_display = st.multiselect(
-            "Select universes for balance sheet analysis",
+            "Select industries for balance sheet analysis",
             options=sorted(bs_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
             default=[],
             help="⚠️ = inverse plays (sectors likely hurt by conflict).",
@@ -2217,11 +2217,11 @@ with tab6:
             overlay_uni_map = universe_display_map()
             overlay_options = sorted(overlay_uni_map.keys(), key=lambda x: ("⚠️" in x, x))
             selected_uni_display = st.selectbox(
-                "Universe",
+                "Industry",
                 options=[""] + overlay_options,
                 index=0,
                 key=f"{tab_key}_overlay_universe",
-                help="Select a universe to populate the ticker list.",
+                help="Select an industry to populate the ticker list.",
             )
             selected_uni = overlay_uni_map.get(selected_uni_display, "")
         with overlay_cols[1]:
@@ -3160,8 +3160,8 @@ with tab8:
 
     st.divider()
 
-    # Universe info
-    st.subheader("Loaded Universes")
+    # Industry info
+    st.subheader("Loaded Industries")
     for name in list_universes():
         uni = load_universe(name)
         st.write(f"**{name}**: {len(uni)} tickers")
