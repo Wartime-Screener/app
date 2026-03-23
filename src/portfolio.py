@@ -94,6 +94,18 @@ def remove_position(position_id: str) -> bool:
     return False
 
 
+def update_position_notes(position_id: str, notes: list) -> bool:
+    """Update the structured notes for a position. *notes* is a list of
+    dicts: [{"text": "...", "level": 0}, ...].  Returns True if found."""
+    data = load_portfolio()
+    for p in data["positions"]:
+        if p["id"] == position_id:
+            p["notes"] = notes
+            save_portfolio(data)
+            return True
+    return False
+
+
 def get_all_tags() -> list[str]:
     """Return a sorted list of unique thesis tags from existing positions."""
     data = load_portfolio()
