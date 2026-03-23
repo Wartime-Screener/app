@@ -1435,8 +1435,10 @@ with tab2:
 
         # DCF Valuation — "What Has to Be True"
         dcf = analysis.get("dcf_valuation", {})
+        # Always show DCF section — Revenue-based DCF works even when FCF data is missing
+        _has_income = bool(analysis.get("income_statements"))
         dcf_has_sliders = dcf.get("dcf_price") is not None or dcf.get("has_data")
-        if dcf_has_sliders:
+        if dcf_has_sliders or _has_income:
             # Store analysis data in session state so the fragment can access it
             st.session_state["_dcf_analysis"] = analysis
             st.session_state["_dcf_initial"] = dcf
@@ -1480,7 +1482,14 @@ with tab2:
                             analyst_label += f"  ({analyst_num} analysts)"
                         st.info(analyst_label)
 
-                    if dcf_mode == "FCF":
+                    if dcf_mode == "FCF" and not dcf_has_sliders:
+                        # FCF mode selected but no usable FCF data
+                        st.warning(
+                            "⚠️ Insufficient or negative historical FCF — cannot run FCF-based DCF. "
+                            "Switch to **Revenue** mode above to model from revenue × target margin instead."
+                        )
+
+                    elif dcf_mode == "FCF":
                         # ===== FCF-BASED DCF =====
                         hist_growth = assumptions.get("hist_fcf_growth")
                         default_growth = assumptions.get("growth_rate", 5.0)
@@ -1579,7 +1588,7 @@ with tab2:
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
 
-                    else:
+                    if dcf_mode == "Revenue":
                         # ===== REVENUE-BASED DCF =====
                         # Compute initial revenue-based DCF for defaults
                         _rev_dcf_init = compute_revenue_dcf_valuation(
@@ -1834,10 +1843,7 @@ with tab2:
 
             _dcf_fragment()
 
-        elif dcf.get("warnings"):
-            with st.expander("DCF Valuation", expanded=True):
-                for w in dcf.get("warnings", []):
-                    st.info(w)
+        # (Removed — DCF section now always renders with Revenue toggle available)
 
 
 # ================================================================== #
