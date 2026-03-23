@@ -1152,7 +1152,7 @@ with tab2:
 
         @st.fragment
         def _transcript_fragment():
-            with st.expander("Earnings Call — Management Commentary", expanded=False):
+            with st.expander("Earnings Calls & Annual Reports — Management Commentary", expanded=False):
                 from datetime import datetime as _dt
                 from src.transcript_summarizer import summarize_transcript, is_configured as _anthropic_configured
 
@@ -1328,14 +1328,16 @@ with tab2:
                 st.markdown("**📋 Paste a Transcript or Report Manually**")
                 st.caption("Paste earnings call text or annual report commentary from any source. Claude will summarize it and save it for future use.")
 
+                # Period type outside the form so it controls layout dynamically
+                _paste_period_type = st.selectbox("Period", options=["Quarterly", "Annual"], index=0, key="paste_period_type")
+
                 with st.form(key="manual_transcript_form"):
-                    _paste_cols = st.columns([1, 1, 1, 3])
+                    _paste_cols = st.columns([1, 3])
                     with _paste_cols[0]:
-                        _paste_period_type = st.selectbox("Period", options=["Quarterly", "Annual"], index=0, key="paste_period_type")
-                    with _paste_cols[1]:
-                        _paste_quarter = st.selectbox("Quarter", options=[1, 2, 3, 4], index=0, key="paste_quarter",
-                                                       disabled=(_paste_period_type == "Annual"))
-                    with _paste_cols[2]:
+                        if _paste_period_type == "Quarterly":
+                            _paste_quarter = st.selectbox("Quarter", options=[1, 2, 3, 4], index=0, key="paste_quarter")
+                        else:
+                            _paste_quarter = 0
                         _paste_year = st.number_input("Year", min_value=2015, max_value=2030, value=2025, key="paste_year")
                     _manual_text = st.text_area(
                         "Paste transcript text here",
