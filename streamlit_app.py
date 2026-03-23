@@ -171,9 +171,9 @@ def _init_portfolio_from_localstorage():
         # JS component hasn't mounted yet — retry a few times
         attempts = st.session_state.get("_portfolio_load_attempts", 0) + 1
         st.session_state["_portfolio_load_attempts"] = attempts
-        if attempts < 3:
+        if attempts < 5:
             import time
-            time.sleep(0.15)
+            time.sleep(0.3)
             st.rerun()
         else:
             # Give up waiting, start with empty portfolio
@@ -198,9 +198,12 @@ def _push_portfolio_to_localstorage():
     if st.session_state.get("portfolio_dirty"):
         data_json = json.dumps(st.session_state["portfolio_data"])
         escaped = data_json.replace("\\", "\\\\").replace("'", "\\'")
+        # Use a unique key each time so Streamlit re-executes the JS
+        save_counter = st.session_state.get("_portfolio_save_counter", 0) + 1
+        st.session_state["_portfolio_save_counter"] = save_counter
         streamlit_js_eval(
             js_expressions=f"localStorage.setItem('{_LS_KEY}', '{escaped}')",
-            key="portfolio_save",
+            key=f"portfolio_save_{save_counter}",
         )
         st.session_state["portfolio_dirty"] = False
 
