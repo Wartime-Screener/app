@@ -42,6 +42,7 @@ from src.universe_loader import list_universes, load_universe
 import src.portfolio as _portfolio_mod
 from src.portfolio import (
     load_portfolio, save_portfolio, add_position, remove_position,
+    update_position_notes,
     get_all_tags, compute_position_performance, compute_portfolio_summary,
     compute_tag_performance, get_position_history, get_spy_benchmark,
 )
@@ -2519,7 +2520,6 @@ with tab7:
                 "Gain/Loss $": f"${perf['gain_loss_dollars']:+,.2f}",
                 "Return %": f"{perf['gain_loss_pct']:+.2f}%",
                 "Days Held": perf["holding_days"],
-                "Notes": p.get("notes", ""),
                 "_id": p["id"],
             })
 
@@ -2542,6 +2542,117 @@ with tab7:
                 idx = remove_options.index(remove_selection)
                 remove_position(positions[idx]["id"])
                 st.success(f"Removed {positions[idx]['ticker']}")
+                st.rerun()
+
+        st.divider()
+
+        # ---- Research Notes ---- #
+        st.subheader("📝 Research Notes")
+
+        # Helper: convert structured notes list to pretty markdown
+        def _notes_to_markdown(notes_list: list) -> str:
+            """Convert [{text, level}, ...] to hierarchical markdown."""
+            _markers = {0: "•", 1: "abcdefghijklmnopqrstuvwxyz", 2: None}
+            _roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
+                       "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
+            counters = {0: 0, 1: 0, 2: 0}
+            lines = []
+            for item in notes_list:
+                lvl = item.get("level", 0)
+                txt = item.get("text", "")
+                if not txt.strip():
+                    continue
+                # Reset lower-level counters when a higher level appears
+                for l in range(lvl + 1, 3):
+                    counters[l] = 0
+                indent = "    " * lvl
+                if lvl == 0:
+                    marker = "•"
+                elif lvl == 1:
+                    idx = counters[1] % 26
+                    marker = f"{chr(97 + idx)}."
+                    counters[1] += 1
+                else:
+                    idx = counters[2] % len(_roman)
+                    marker = f"{_roman[idx]}."
+                    counters[2] += 1
+                lines.append(f"{indent}{marker} {txt}")
+            return "\n".join(lines)
+
+        # Select which position to add notes to
+        note_options = [f"{p['ticker']} — {p['buy_date']} ({p['thesis_tag']})" for p in positions]
+        note_selection = st.selectbox("Select position", note_options, key="note_pos_select")
+        note_idx = note_options.index(note_selection)
+        note_pos = positions[note_idx]
+
+        # Get existing notes (migrate from old string format if needed)
+        existing_notes = note_pos.get("notes", "")
+        if isinstance(existing_notes, str):
+            # Old format — convert to structured list
+            if existing_notes.strip():
+                structured_notes = [{"text": existing_notes, "level": 0}]
+            else:
+                structured_notes = []
+        else:
+            structured_notes = existing_notes if existing_notes else []
+
+        # Display existing notes in a styled box
+        if structured_notes:
+            rendered = _notes_to_markdown(structured_notes)
+            st.markdown(
+                f"""<div style="background-color: #1e1e2e; border: 1px solid #444;
+                border-radius: 8px; padding: 16px; margin-bottom: 16px;
+                font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
+                line-height: 1.8; white-space: pre-wrap; color: #e0e0e0;">
+{rendered}</div>""",
+                unsafe_allow_html=True,
+            )
+
+        # Add new note
+        st.caption("Use **Tab** to indent (or start line with spaces). "
+                   "Level 1 = bullets, Level 2 = letters, Level 3 = roman numerals.")
+
+        with st.form(key="add_note_form", clear_on_submit=True):
+            note_cols = st.columns([5, 1])
+            with note_cols[0]:
+                new_note_text = st.text_area(
+                    "Add notes",
+                    height=120,
+                    placeholder="Type your thoughts...\n  Indented = sub-point (a, b, c)\n    Double-indent = sub-sub-point (i, ii, iii)",
+                    key="new_note_input",
+                    label_visibility="collapsed",
+                )
+            with note_cols[1]:
+                st.write("")
+                save_note = st.form_submit_button("💾 Save", use_container_width=True)
+
+        if save_note and new_note_text.strip():
+            # Parse indentation levels from the text
+            new_entries = []
+            for line in new_note_text.split("\n"):
+                if not line.strip():
+                    continue
+                # Count leading spaces/tabs to determine level
+                stripped = line.lstrip()
+                leading = len(line) - len(stripped)
+                if line.startswith("\t\t") or leading >= 8:
+                    level = 2
+                elif line.startswith("\t") or leading >= 4:
+                    level = 1
+                else:
+                    level = 0
+                new_entries.append({"text": stripped, "level": level})
+
+            updated_notes = structured_notes + new_entries
+            update_position_notes(note_pos["id"], updated_notes)
+            st.success("Notes saved!")
+            st.rerun()
+
+        # Option to clear all notes for this position
+        if structured_notes:
+            if st.button("🗑️ Clear all notes for this position", key="clear_notes_btn"):
+                update_position_notes(note_pos["id"], [])
+                st.success("Notes cleared.")
                 st.rerun()
 
         st.divider()
