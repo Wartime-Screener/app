@@ -2611,33 +2611,69 @@ with tab7:
                 unsafe_allow_html=True,
             )
 
-        # Add new note — one line at a time with level picker
-        st.caption("Add a thought, pick its depth, and hit Save. "
-                   "**•** = main point, **a.** = supporting detail, **i.** = sub-detail.")
+        # Add new note — type and press Enter to save
+        _roman = ["i","ii","iii","iv","v","vi","vii","viii","ix","x",
+                   "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx"]
 
-        with st.form(key="add_note_form", clear_on_submit=True):
-            note_input_cols = st.columns([1, 5, 1])
-            with note_input_cols[0]:
-                note_level = st.selectbox(
-                    "Depth",
-                    options=[0, 1, 2],
-                    format_func=lambda x: {0: "• Main", 1: "  a. Detail", 2: "    i. Sub"}[x],
-                    key="note_level_input",
-                )
-            with note_input_cols[1]:
-                new_note_text = st.text_input(
-                    "Note",
-                    placeholder="Type your thought here...",
-                    key="new_note_input",
-                    label_visibility="collapsed",
-                )
-            with note_input_cols[2]:
-                save_note = st.form_submit_button("💾 Save", use_container_width=True)
+        def _next_marker(notes_list: list, level: int) -> str:
+            """Compute the next sequential marker for a given level."""
+            # Count how many items at this level follow the last higher-level item
+            count = 0
+            for item in reversed(notes_list):
+                if item.get("level", 0) == level:
+                    count += 1
+                elif item.get("level", 0) < level:
+                    break  # stop counting at the parent
+            if level == 0:
+                return "•"
+            elif level == 1:
+                return f"{chr(97 + count % 26)}."
+            else:
+                return f"{_roman[count % len(_roman)]}."
 
-        if save_note and new_note_text.strip():
-            new_entry = {"text": new_note_text.strip(), "level": note_level}
+        # Compute next markers for the dropdown labels
+        _next_main = "•"
+        _next_detail = _next_marker(structured_notes, 1)
+        _next_sub = _next_marker(structured_notes, 2)
+
+        st.caption("Type a thought and press **Enter** to save it. "
+                   "Change depth for sub-points.")
+
+        # Check if a note was submitted on previous run (text_input triggers rerun on Enter)
+        _pending_text = st.session_state.get("_note_pending_text", "")
+        _pending_level = st.session_state.get("_note_pending_level", 0)
+        if _pending_text.strip():
+            new_entry = {"text": _pending_text.strip(), "level": _pending_level}
             updated_notes = structured_notes + [new_entry]
             update_position_notes(note_pos["id"], updated_notes)
+            st.session_state["_note_pending_text"] = ""
+            st.session_state["note_text_input"] = ""  # clear the text input
+            st.rerun()
+
+        note_input_cols = st.columns([1, 5])
+        with note_input_cols[0]:
+            note_level = st.selectbox(
+                "Depth",
+                options=[0, 1, 2],
+                format_func=lambda x: {
+                    0: f"{_next_main} Main",
+                    1: f"   {_next_detail} Detail",
+                    2: f"      {_next_sub} Sub",
+                }[x],
+                key="note_level_input",
+            )
+        with note_input_cols[1]:
+            new_note_text = st.text_input(
+                "Note",
+                placeholder="Type your thought and press Enter...",
+                key="note_text_input",
+                label_visibility="collapsed",
+            )
+
+        # If user pressed Enter (text_input has value and we haven't processed it)
+        if new_note_text.strip():
+            st.session_state["_note_pending_text"] = new_note_text
+            st.session_state["_note_pending_level"] = note_level
             st.rerun()
 
         # Option to clear all notes for this position
