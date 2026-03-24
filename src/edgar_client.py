@@ -241,7 +241,7 @@ class EDGARClient:
         filings = []
         for i in range(len(forms)):
             form_type = forms[i] if i < len(forms) else ""
-            if form_type in ("10-Q", "10-K"):
+            if form_type in ("10-Q", "10-K", "20-F"):
                 filings.append({
                     "form": form_type,
                     "filingDate": filing_dates[i] if i < len(filing_dates) else "",
@@ -315,6 +315,67 @@ class EDGARClient:
                 "reportDate": report_date,
                 "fiscalYear": fiscal_year,
                 "fiscalQuarter": fiscal_quarter,
+                "period": period,
+            })
+
+        return results
+
+    def get_recent_filing_links(self, ticker: str, limit: int = 8) -> list[dict]:
+        """
+        Get direct EDGAR links for recent 10-K and 10-Q filings.
+
+        Args:
+            ticker: Stock ticker symbol.
+            limit: Maximum number of filings to return.
+
+        Returns:
+            List of dicts with: form, filingDate, reportDate, url, period.
+        """
+        cik = self.get_cik(ticker)
+        if cik is None:
+            return []
+
+        filings = self.get_filing_history(ticker)
+        if not filings:
+            return []
+
+        results = []
+        for filing in filings[:limit]:
+            accession = filing.get("accessionNumber", "")
+            primary_doc = filing.get("primaryDocument", "")
+            form_type = filing.get("form", "")
+            filing_date = filing.get("filingDate", "")
+            report_date = filing.get("reportDate", "")
+
+            if not accession or not primary_doc:
+                continue
+
+            # Build EDGAR URL: accession number without dashes for the path
+            accession_no_dashes = accession.replace("-", "")
+            url = (
+                f"https://www.sec.gov/Archives/edgar/data/"
+                f"{cik}/{accession_no_dashes}/{primary_doc}"
+            )
+
+            # Build period label
+            try:
+                rd = datetime.strptime(report_date, "%Y-%m-%d")
+                if form_type == "10-K":
+                    period = f"FY {rd.year}"
+                elif form_type == "20-F":
+                    period = f"FY {rd.year}"
+                else:
+                    month = rd.month
+                    q = (month - 1) // 3 + 1
+                    period = f"Q{q} {rd.year}"
+            except (ValueError, AttributeError):
+                period = form_type
+
+            results.append({
+                "form": form_type,
+                "filingDate": filing_date,
+                "reportDate": report_date,
+                "url": url,
                 "period": period,
             })
 

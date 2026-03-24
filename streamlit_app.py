@@ -1120,6 +1120,21 @@ with tab2:
                         st.dataframe(trades_df, use_container_width=True, hide_index=True,
                                      height=min(len(trade_rows) * 35 + 38, 500))
 
+        # SEC EDGAR Filing Links
+        with st.expander("📄 SEC Filings", expanded=False):
+            _filing_links = edgar.get_recent_filing_links(analysis["ticker"], limit=8)
+            if _filing_links:
+                for _fl in _filing_links:
+                    _form = _fl["form"]
+                    _period = _fl["period"]
+                    _filed = _fl["filingDate"]
+                    _url = _fl["url"]
+                    st.markdown(
+                        f"[**{_form}** — {_period}]({_url}) &nbsp; · &nbsp; filed {_filed}"
+                    )
+            else:
+                st.info("No SEC filings found for this ticker (may be a foreign issuer without 10-K/10-Q filings).")
+
         # Earnings Call Transcript — Management Commentary
         # --- Local transcript save/load helpers ---
         _TRANSCRIPT_DIR = Path(__file__).parent / "data" / "transcripts"
