@@ -658,11 +658,12 @@ with tab2:
                 _pt_current = analysis.get("current_price", 0) or 0
                 if _pt_consensus and _pt_current > 0:
                     _pt_upside = ((_pt_consensus - _pt_current) / _pt_current) * 100
+                    _pt_label = "upside" if _pt_upside >= 0 else "downside"
                     st.metric(
                         "Analyst Target",
                         f"${_pt_consensus:,.2f}",
-                        delta=f"{_pt_upside:+.1f}% upside",
-                        delta_color="normal" if _pt_upside >= 0 else "inverse",
+                        delta=f"{_pt_upside:+.1f}% {_pt_label}",
+                        delta_color="normal",
                         help=f"Low: ${_pt.get('targetLow', 'N/A')}  ·  Median: ${_pt.get('targetMedian', 'N/A')}  ·  High: ${_pt.get('targetHigh', 'N/A')}",
                     )
                 else:
