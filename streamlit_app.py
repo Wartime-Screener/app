@@ -1756,16 +1756,22 @@ with tab2:
 
                     # --- Summary metrics ---
                     st.markdown("#### Valuation")
+                    # Use validated price (corrected by price validator) instead of stale FMP price
+                    _dcf_current_price = analysis.get("current_price") or dcf_display.get("current_price", 0)
                     dcf_cols = st.columns(4)
                     with dcf_cols[0]:
                         st.metric("Current Price",
-                                  f"${dcf_display.get('current_price', 0):.2f}" if dcf_display.get('current_price') else "N/A")
+                                  f"${_dcf_current_price:.2f}" if _dcf_current_price else "N/A")
                     with dcf_cols[1]:
                         dcf_price = dcf_display.get("dcf_price")
                         st.metric("DCF Intrinsic Value",
                                   f"${dcf_price:,.2f}" if dcf_price else "N/A")
                     with dcf_cols[2]:
-                        dcf_upside = dcf_display.get("upside_pct")
+                        # Recalculate upside using validated price
+                        if dcf_price and _dcf_current_price and _dcf_current_price > 0:
+                            dcf_upside = round((dcf_price / _dcf_current_price - 1) * 100, 1)
+                        else:
+                            dcf_upside = dcf_display.get("upside_pct")
                         if dcf_upside is not None:
                             st.metric("Upside/Downside", f"{dcf_upside:+.1f}%",
                                       delta=f"{dcf_upside:+.1f}%",
@@ -1815,8 +1821,8 @@ with tab2:
                         sens_df = sens_df.rename(columns={"growth_rate": "Growth %"})
                         sens_df = sens_df.set_index("Growth %")
 
-                        # Style: highlight cells near current price
-                        current_p = dcf_display.get("current_price", 0) or 0
+                        # Style: highlight cells near current price (use validated price)
+                        current_p = _dcf_current_price or 0
 
                         def color_cell(val):
                             if val == "N/A" or not isinstance(val, (int, float)):
