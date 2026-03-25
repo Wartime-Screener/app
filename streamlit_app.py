@@ -1489,14 +1489,27 @@ with tab2:
 
                     st.markdown("#### Assumptions")
 
-                    # Show analyst growth context if available
-                    analyst_growth = assumptions.get("analyst_revenue_growth")
-                    analyst_num = assumptions.get("analyst_num_analysts")
-                    if analyst_growth is not None:
-                        analyst_label = f"Analyst Consensus Revenue Growth (CAGR): **{analyst_growth:+.1f}%**"
-                        if analyst_num:
-                            analyst_label += f"  ({analyst_num} analysts)"
-                        st.info(analyst_label)
+                    # Show analyst growth context based on selected mode
+                    if dcf_mode == "Revenue":
+                        analyst_growth = assumptions.get("analyst_revenue_growth")
+                        analyst_num = assumptions.get("analyst_num_analysts")
+                        if analyst_growth is not None:
+                            analyst_label = f"Analyst Consensus Revenue Growth (CAGR): **{analyst_growth:+.1f}%**"
+                            if analyst_num:
+                                analyst_label += f"  ({analyst_num} analysts)"
+                            st.info(analyst_label)
+                    else:
+                        # FCF mode — show FCF growth context
+                        hist_fcf_growth = assumptions.get("hist_fcf_growth")
+                        analyst_growth = assumptions.get("analyst_revenue_growth")
+                        analyst_num = assumptions.get("analyst_num_analysts")
+                        if hist_fcf_growth is not None:
+                            st.info(f"Historical FCF CAGR: **{hist_fcf_growth:+.1f}%**")
+                        if analyst_growth is not None:
+                            _rev_label = f"Analyst Consensus Revenue Growth: {analyst_growth:+.1f}%"
+                            if analyst_num:
+                                _rev_label += f"  ({analyst_num} analysts)"
+                            st.caption(_rev_label)
 
                     # Initialize dcf_display so Valuation section always has something to read
                     dcf_display = _dcf or {}
