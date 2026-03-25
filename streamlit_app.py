@@ -764,6 +764,25 @@ with tab2:
                 "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
             }
 
+            # Metrics that are ratios (0.087 = 8.7%) and should display as percentages
+            _pct_metrics = {
+                "fcf_yield", "earnings_yield", "dividend_yield",
+                "roe", "roa", "roic",
+                "gross_margin", "operating_margin", "net_margin",
+                "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
+                "dividend_payout_ratio",
+            }
+
+            def _fmt_val(val, metric_name):
+                """Format a metric value — convert ratios to percentages where appropriate."""
+                if val is None:
+                    return None
+                if metric_name in _pct_metrics:
+                    return f"{val * 100:.2f}%"
+                if isinstance(val, float):
+                    return round(val, 4)
+                return val
+
             rows = []
             percentiles = []
             labels = []
@@ -772,10 +791,10 @@ with tab2:
                 display_name = pretty_names.get(metric_name, metric_name)
                 rows.append({
                     "Metric": display_name,
-                    "Current": data.get("current"),
-                    f"{history_years}yr Median": data.get("hist_median"),
-                    f"{history_years}yr Low": data.get("hist_low"),
-                    f"{history_years}yr High": data.get("hist_high"),
+                    "Current": _fmt_val(data.get("current"), metric_name),
+                    f"{history_years}yr Median": _fmt_val(data.get("hist_median"), metric_name),
+                    f"{history_years}yr Low": _fmt_val(data.get("hist_low"), metric_name),
+                    f"{history_years}yr High": _fmt_val(data.get("hist_high"), metric_name),
                     "Percentile": data.get("percentile"),
                     "Years of Data": data.get("years_of_data"),
                 })
