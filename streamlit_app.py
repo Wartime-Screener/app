@@ -1618,8 +1618,8 @@ with tab2:
                             analyst_estimates=_analysis.get("analyst_estimates", []),
                         )
                         _rev_assumptions = _rev_dcf_init.get("assumptions", {})
-                        _default_rev_growth = _rev_assumptions.get("revenue_growth", 8.0)
-                        _default_fcf_margin = _rev_assumptions.get("target_fcf_margin", 10.0)
+                        _default_rev_growth = max(min(_rev_assumptions.get("revenue_growth", 8.0), 75.0), -20.0)
+                        _default_fcf_margin = max(_rev_assumptions.get("target_fcf_margin", 10.0), 1.0)
                         _default_discount_r = _rev_assumptions.get("discount_rate", 10.0)
                         _default_terminal_r = _rev_assumptions.get("terminal_growth", 2.5)
                         _hist_rev_growth = _rev_assumptions.get("hist_rev_growth")
