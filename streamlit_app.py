@@ -367,16 +367,6 @@ analyze a specific company.*"""
             key="history_years",
         )
     with filter_cols[1]:
-        score_threshold = st.slider(
-            "Max Composite Score",
-            min_value=0,
-            max_value=100,
-            value=100,
-            step=5,
-            help="Filter out tickers with composite score above this threshold. "
-                 "Lower score = more potentially undervalued.",
-        )
-    with filter_cols[2]:
         max_pe = st.number_input(
             "Max P/E Ratio",
             min_value=0.0,
@@ -422,8 +412,6 @@ analyze a specific company.*"""
 
         # Apply filters
         filters = {}
-        if score_threshold < 100:
-            filters["max_composite_score"] = float(score_threshold)
         if max_pe < 500:
             filters["max_pe"] = max_pe
 
@@ -433,7 +421,6 @@ analyze a specific company.*"""
         # Select display columns
         display_cols = [
             "ticker", "company_name", "segment", "current_price",
-            "composite_score",
         ]
 
         # Add ratio columns if they exist
@@ -462,7 +449,6 @@ analyze a specific company.*"""
             "company_name": "Company",
             "segment": "Segment",
             "current_price": "Price",
-            "composite_score": "Score",
             "flags": "Flags",
         }
         rename_map.update({k: v for k, v in ratio_display.items() if k in display_df.columns})
@@ -647,16 +633,13 @@ with tab2:
             _price_corrected = True
 
         # Company header (now uses corrected price if applicable)
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Company", analysis["company_name"])
         with col2:
             price = analysis.get("current_price")
             st.metric("Price", f"${price:,.2f}" if price else "N/A")
         with col3:
-            score = analysis.get("composite_score")
-            st.metric("Composite Score", f"{score:.1f}" if score else "N/A")
-        with col4:
             # Analyst price target consensus
             _pt = fmp.get_price_target_consensus(analysis["ticker"])
             if _pt:
@@ -3230,39 +3213,6 @@ with tab7:
 # ------------------------------------------------------------------ #
 with tab8:
     st.header("Settings")
-
-    # Scoring weights
-    st.subheader("Scoring Weights")
-    scoring_cfg = load_scoring_config()
-    weights = scoring_cfg.get("weights", {})
-
-    st.write("Adjust the weight of each metric in the composite score. Weights should sum to 1.0.")
-
-    weight_cols = st.columns(4)
-    new_weights = {}
-    weight_items = list(weights.items())
-    for i, (metric, weight) in enumerate(weight_items):
-        col_idx = i % 4
-        with weight_cols[col_idx]:
-            new_weights[metric] = st.number_input(
-                metric.replace("_", " ").title(),
-                min_value=0.0, max_value=1.0, value=float(weight),
-                step=0.05, key=f"weight_{metric}",
-            )
-
-    weight_sum = sum(new_weights.values())
-    if abs(weight_sum - 1.0) > 0.01:
-        st.warning(f"Weights sum to {weight_sum:.2f}. They should sum to 1.0.")
-    else:
-        st.success(f"Weights sum to {weight_sum:.2f}")
-
-    if st.button("Save Scoring Weights"):
-        scoring_cfg["weights"] = new_weights
-        SCORING_PATH.write_text(json.dumps(scoring_cfg, indent=2))
-        st.success("Scoring weights saved.")
-        st.rerun()
-
-    st.divider()
 
     # Cache TTLs
     st.subheader("Cache TTL Settings")
