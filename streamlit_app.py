@@ -620,9 +620,12 @@ with tab2:
             st.error("FMP API key is required for deep dive analysis. Set FMP_API_KEY.")
         else:
             with st.spinner(f"Analyzing {selected_ticker}..."):
-                # Get universe info
-                info_row = all_tickers_df[all_tickers_df["ticker"] == selected_ticker]
+                # Get universe info (may be empty if using direct ticker search)
                 universe_info = {}
+                if not all_tickers_df.empty and "ticker" in all_tickers_df.columns:
+                    info_row = all_tickers_df[all_tickers_df["ticker"] == selected_ticker]
+                else:
+                    info_row = pd.DataFrame()
                 if not info_row.empty:
                     r = info_row.iloc[0]
                     universe_info = {
