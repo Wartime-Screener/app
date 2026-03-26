@@ -774,12 +774,22 @@ with tab2:
                 "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
             }
 
+            # YoY growth metrics where extreme values are base-effect distortions
+            _yoy_metrics = {"revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy"}
+
             def _fmt_metric_val(val, metric_name):
                 """Format a metric value, converting decimals to % where appropriate."""
                 if val is None:
                     return None
                 if metric_name in _pct_display_metrics:
-                    return f"{val * 100:.2f}%"
+                    pct = val * 100
+                    # Cap extreme YoY growth values (base-effect distortions)
+                    if metric_name in _yoy_metrics:
+                        if pct > 200:
+                            return ">200%"
+                        if pct < -100:
+                            return "<-100%"
+                    return f"{pct:.2f}%"
                 return val
 
             rows = []
@@ -1251,7 +1261,7 @@ with tab2:
                     _ty = _selected_entry["year"] if _selected_entry else 2025
 
                     # Use a form to prevent page scroll on submit
-                    with st.form(key="transcript_form"):
+                    with st.form(key=f"transcript_form_{analysis['ticker']}"):
                         _load_clicked = st.form_submit_button("Load Transcript")
 
                     if _load_clicked:
@@ -1381,7 +1391,7 @@ with tab2:
                 # Period type outside the form so it controls layout dynamically
                 _paste_period_type = st.selectbox("Period", options=["Quarterly", "Annual"], index=0, key="paste_period_type")
 
-                with st.form(key="manual_transcript_form"):
+                with st.form(key=f"manual_transcript_form_{analysis['ticker']}"):
                     _paste_cols = st.columns([1, 3])
                     with _paste_cols[0]:
                         if _paste_period_type == "Quarterly":
