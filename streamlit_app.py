@@ -792,11 +792,23 @@ with tab2:
                     return f"{pct:.2f}%"
                 return val
 
+            # Metrics to hide entirely when data is clearly garbage
+            _garbage_thresholds = {
+                "dividend_yield": 0.20,       # > 20% dividend yield is bad data
+                "dividend_payout_ratio": 5.0,  # > 500% payout ratio is bad data
+            }
+
             rows = []
             percentiles = []
             labels = []
             metric_keys = []
             for metric_name, data in metrics.items():
+                # Skip metrics with garbage values
+                current_val = data.get("current")
+                if metric_name in _garbage_thresholds and current_val is not None:
+                    if abs(current_val) > _garbage_thresholds[metric_name]:
+                        continue  # hide entirely
+
                 display_name = pretty_names.get(metric_name, metric_name)
                 rows.append({
                     "Metric": display_name,
