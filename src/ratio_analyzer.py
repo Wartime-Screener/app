@@ -746,8 +746,12 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         warnings.append(f"Terminal value is {terminal_pct:.0f}% of total — valuation heavily depends on long-term assumptions")
 
     # --- Sensitivity table ---
-    # Center on Phase 1 rate if multi-stage, otherwise the flat growth rate
-    _sens_center_rate = growth_stages[0]["rate"] if growth_stages else growth_rate
+    # Center on weighted average of multi-stage rates, or flat growth rate
+    if growth_stages:
+        _total_years = sum(s["years"] for s in growth_stages) or 1
+        _sens_center_rate = sum(s["rate"] * s["years"] for s in growth_stages) / _total_years
+    else:
+        _sens_center_rate = growth_rate
     # Growth rates: centered on selected, +/- 4 steps of 2%
     growth_steps = [_sens_center_rate + (i - 4) * 0.02 for i in range(9)]
     growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.50]  # clamp
@@ -1009,8 +1013,12 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         warnings.append(f"Terminal value is {terminal_pct:.0f}% of total — valuation heavily depends on long-term assumptions")
 
     # --- Sensitivity table (revenue growth × discount rate) ---
-    # Center on Phase 1 rate if multi-stage, otherwise the flat revenue growth rate
-    _sens_center_rate = growth_stages[0]["rate"] if growth_stages else revenue_growth
+    # Center on weighted average of multi-stage rates, or flat revenue growth rate
+    if growth_stages:
+        _total_years = sum(s["years"] for s in growth_stages) or 1
+        _sens_center_rate = sum(s["rate"] * s["years"] for s in growth_stages) / _total_years
+    else:
+        _sens_center_rate = revenue_growth
     growth_steps = [_sens_center_rate + (i - 4) * 0.02 for i in range(9)]
     growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.50]
     discount_steps = [discount_rate + (i - 3) * 0.01 for i in range(7)]
