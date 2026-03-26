@@ -558,6 +558,16 @@ with tab2:
             except Exception:
                 continue
 
+    # Direct ticker search — type any symbol
+    _direct_ticker = st.text_input(
+        "🔍 Search any ticker",
+        placeholder="Type a ticker symbol (e.g. AAPL, TSLA, BAH)...",
+        help="Enter any US-listed ticker symbol directly — no need to select an industry first.",
+        key="dd_direct_ticker",
+    ).strip().upper()
+
+    st.caption("— or browse by industry —")
+
     dd_display = st.multiselect(
         "Select Industries",
         options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
@@ -580,18 +590,22 @@ with tab2:
             for _, row in all_tickers_df.iterrows() if row.get("company_name")
         }
 
-    # If jumping, force-set the selectbox to the clicked ticker
-    if _jump_ticker and _jump_ticker in ticker_options:
-        st.session_state["dd_ticker_select"] = _jump_ticker
+    # Determine selected ticker: direct search takes priority
+    if _direct_ticker:
+        selected_ticker = _direct_ticker
+    else:
+        # If jumping, force-set the selectbox to the clicked ticker
+        if _jump_ticker and _jump_ticker in ticker_options:
+            st.session_state["dd_ticker_select"] = _jump_ticker
 
-    selected_ticker = st.selectbox(
-        "Select Ticker",
-        options=ticker_options,
-        index=0 if ticker_options else None,
-        format_func=lambda t: ticker_labels.get(t, t),
-        help="Choose a ticker for detailed fundamental analysis.",
-        key="dd_ticker_select",
-    )
+        selected_ticker = st.selectbox(
+            "Select Ticker",
+            options=ticker_options,
+            index=0 if ticker_options else None,
+            format_func=lambda t: ticker_labels.get(t, t),
+            help="Choose a ticker for detailed fundamental analysis.",
+            key="dd_ticker_select",
+        ) if ticker_options else None
 
     # Clear stale analysis if the user changed the ticker
     if "deep_dive" in st.session_state:
