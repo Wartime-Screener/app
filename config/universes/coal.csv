@@ -1,9 +1,12 @@
 ticker,company_name,segment,sub_segment
-BTU,Peabody Energy Corporation,thermal,major
-HCC,Warrior Met Coal Inc,metallurgical,major
-CNR,Core Natural Resources Inc,diversified,appalachia
-AMR,Alpha Metallurgical Resources Inc,metallurgical,appalachia
-METC,Ramaco Resources Inc,metallurgical,appalachia
-ARLP,Alliance Resource Partners LP,thermal,illinois_basin
-NC,NACCO Industries Inc,thermal,lignite
-SXC,SunCoke Energy Inc,metallurgical,coke
+AMR,"Alpha Metallurgical Resources, Inc.",coal,
+AREC,American Resources Corporation,coal,
+ARLP,"Alliance Resource Partners, L.P.",coal,
+BTU,Peabody Energy Corporation,coal,
+CNR,"Core Natural Resources, Inc.",coal,
+HCC,"Warrior Met Coal, Inc.",coal,
+HNRG,Hallador Energy Company,coal,
+METC,"Ramaco Resources, Inc.",coal,
+METCB,"Ramaco Resources, Inc.",coal,
+NC,"NACCO Industries, Inc.",coal,
+NRP,Natural Resource Partners L.P.,coal,
