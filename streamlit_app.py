@@ -607,6 +607,12 @@ with tab2:
         key="dd_ticker_select",
     )
 
+    # Clear stale analysis if the user changed the ticker
+    if "deep_dive" in st.session_state:
+        _prev_ticker = st.session_state["deep_dive"].get("ticker")
+        if _prev_ticker and selected_ticker and _prev_ticker != selected_ticker:
+            del st.session_state["deep_dive"]
+
     # Auto-analyze if jumped from screener, or manual button click
     _trigger_analyze = bool(_jump_ticker and selected_ticker)
     if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze:
