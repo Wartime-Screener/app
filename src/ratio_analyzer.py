@@ -746,9 +746,11 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         warnings.append(f"Terminal value is {terminal_pct:.0f}% of total — valuation heavily depends on long-term assumptions")
 
     # --- Sensitivity table ---
+    # Center on Phase 1 rate if multi-stage, otherwise the flat growth rate
+    _sens_center_rate = growth_stages[0]["rate"] if growth_stages else growth_rate
     # Growth rates: centered on selected, +/- 4 steps of 2%
-    growth_steps = [growth_rate + (i - 4) * 0.02 for i in range(9)]
-    growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.30]  # clamp
+    growth_steps = [_sens_center_rate + (i - 4) * 0.02 for i in range(9)]
+    growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.50]  # clamp
     # Discount rates: centered on selected, +/- 3 steps of 1%
     discount_steps = [discount_rate + (i - 3) * 0.01 for i in range(7)]
     discount_steps = [d for d in discount_steps if 0.04 <= d <= 0.20]  # clamp
@@ -1007,7 +1009,9 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         warnings.append(f"Terminal value is {terminal_pct:.0f}% of total — valuation heavily depends on long-term assumptions")
 
     # --- Sensitivity table (revenue growth × discount rate) ---
-    growth_steps = [revenue_growth + (i - 4) * 0.02 for i in range(9)]
+    # Center on Phase 1 rate if multi-stage, otherwise the flat revenue growth rate
+    _sens_center_rate = growth_stages[0]["rate"] if growth_stages else revenue_growth
+    growth_steps = [_sens_center_rate + (i - 4) * 0.02 for i in range(9)]
     growth_steps = [g for g in growth_steps if -0.10 <= g <= 0.50]
     discount_steps = [discount_rate + (i - 3) * 0.01 for i in range(7)]
     discount_steps = [d for d in discount_steps if 0.04 <= d <= 0.20]
