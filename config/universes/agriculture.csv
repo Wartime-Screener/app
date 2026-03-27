@@ -1,21 +1,34 @@
 ticker,company_name,segment,sub_segment
-ADM,Archer-Daniels-Midland Company,grain_trading,major
-BG,Bunge Global SA,grain_trading,major
-CTVA,Corteva Inc,crop_protection,major
-CF,CF Industries Holdings Inc,fertilizer,nitrogen
-MOS,The Mosaic Company,fertilizer,phosphate_potash
-NTR,Nutrien Ltd,fertilizer,diversified
-FMC,FMC Corporation,crop_protection,specialty
-DE,Deere & Company,equipment,major
-AGCO,AGCO Corporation,equipment,mid_cap
-ANDE,The Andersons Inc,grain_trading,mid_cap
-INGR,Ingredion Incorporated,specialty,ingredients
-DAR,Darling Ingredients Inc,specialty,rendering
-CALM,Cal-Maine Foods Inc,specialty,eggs
-SMG,The Scotts Miracle-Gro Company,specialty,lawn_garden
-CNH,CNH Industrial NV,equipment,major
-AVTR,Avantor Inc,specialty,ag_science
-ICL,ICL Group Ltd,fertilizer,specialty
-LXU,LSB Industries Inc,fertilizer,nitrogen
-IIPR,Innovative Industrial Properties,specialty,cannabis_reit
-VITL,Vital Farms Inc,specialty,eggs
+ADM,Archer-Daniels-Midland Company,agriculture,
+AFRI,Forafric Global PLC,agriculture,
+AFRIW,Forafric Global PLC,agriculture,
+AGCO,AGCO Corporation,agriculture,
+AGRO,Adecoagro S.A.,agriculture,
+ANDE,The Andersons Inc,agriculture,
+AQB,"AquaBounty Technologies, Inc.",agriculture,
+AVTR,Avantor Inc,agriculture,
+BG,Bunge Global SA,agriculture,
+CALM,Cal-Maine Foods Inc,agriculture,
+CF,CF Industries Holdings Inc,agriculture,
+CNH,CNH Industrial NV,agriculture,
+CTVA,Corteva Inc,agriculture,
+DAR,Darling Ingredients Inc,agriculture,
+DE,Deere & Company,agriculture,
+DOLE,Dole plc,agriculture,
+EDBL,Edible Garden AG Incorporated,agriculture,
+EDBLW,Edible Garden AG Incorporated,agriculture,
+FDP,Fresh Del Monte Produce Inc.,agriculture,
+FMC,FMC Corporation,agriculture,
+ICL,ICL Group Ltd,agriculture,
+IIPR,Innovative Industrial Properties,agriculture,
+INGR,Ingredion Incorporated,agriculture,
+LMNR,Limoneira Company,agriculture,
+LND,BrasilAgro - Companhia Brasileira de Propriedades Agrícolas,agriculture,
+LOCL,Local Bounti Corporation,agriculture,
+LXU,LSB Industries Inc,agriculture,
+MOS,The Mosaic Company,agriculture,
+NTR,Nutrien Ltd,agriculture,
+SFD,"Smithfield Foods, Inc.",agriculture,
+SMG,The Scotts Miracle-Gro Company,agriculture,
+TSN,"Tyson Foods, Inc.",agriculture,
+VITL,Vital Farms Inc,agriculture,
