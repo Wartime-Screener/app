@@ -719,6 +719,20 @@ with tab2:
                 _src_strs = [f"{k}: ${v:,.2f}" for k, v in _pv_sources.items()]
                 st.caption(f"✓ Price validated across {len(_pv_sources)} sources ({' · '.join(_src_strs)})")
 
+        # Show which industries this ticker belongs to
+        _ticker_industries = []
+        _dd_uni_map = universe_display_map()
+        for _disp_name, _file_name in _dd_uni_map.items():
+            try:
+                _udf = load_universe(_file_name)
+                if analysis["ticker"] in _udf["ticker"].values:
+                    _ticker_industries.append(_disp_name)
+            except Exception:
+                continue
+        if _ticker_industries:
+            _ind_tags = " · ".join(f"**{ind}**" for ind in _ticker_industries)
+            st.caption(f"🏷️ Industries: {_ind_tags}")
+
         # Company profile
         profile = fmp.get_company_profile(analysis["ticker"])
         if profile:
