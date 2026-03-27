@@ -603,8 +603,7 @@ with tab2:
 
     # Auto-analyze: when a ticker is selected and no analysis exists yet, or jumped from screener
     _trigger_analyze = bool(_jump_ticker and selected_ticker)
-    _needs_analysis = selected_ticker and "deep_dive" not in st.session_state
-    if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze or _needs_analysis:
+    if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze:
         if not fmp.is_configured:
             st.error("FMP API key is required for deep dive analysis. Set FMP_API_KEY.")
         else:
