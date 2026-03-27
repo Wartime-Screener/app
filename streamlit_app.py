@@ -589,8 +589,38 @@ with tab2:
         key="dd_search_ticker",
     )
 
-    # Determine selected ticker
-    selected_ticker = _search_ticker if _search_ticker else None
+    st.caption("— or browse by industry —")
+
+    dd_display = st.multiselect(
+        "Select Industries",
+        options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
+        default=[],
+        help="Choose one or more industries to browse tickers from. ⚠️ = inverse plays.",
+        key="dd_universes",
+    )
+
+    # If industries are selected, show a ticker picker from those industries
+    _industry_ticker = None
+    if dd_display:
+        dd_universes = [dd_uni_map[d] for d in dd_display]
+        frames = [load_universe(u) for u in dd_universes]
+        industry_df = pd.concat(frames, ignore_index=True).drop_duplicates(subset="ticker", keep="first")
+        industry_options = sorted(industry_df["ticker"].unique().tolist())
+        industry_labels = {
+            row["ticker"]: f"{row['ticker']} — {row['company_name']}"
+            for _, row in industry_df.iterrows() if row.get("company_name")
+        }
+
+        _industry_ticker = st.selectbox(
+            "Select Ticker",
+            options=industry_options,
+            format_func=lambda t: industry_labels.get(t, t),
+            help="Choose a ticker from the selected industries.",
+            key="dd_industry_ticker",
+        )
+
+    # Determine selected ticker — search box takes priority, then industry picker
+    selected_ticker = _search_ticker if _search_ticker else _industry_ticker
 
     # Build all_tickers_df for universe info lookup
     all_tickers_df = _master_df
