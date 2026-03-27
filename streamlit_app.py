@@ -1659,7 +1659,7 @@ with tab2:
                             with wacc_term_cols[0]:
                                 user_discount = st.number_input(
                                     f"Discount Rate / WACC (%)  ·  Beta: {assumptions.get('beta', 1.0):.2f}",
-                                    min_value=5.0, max_value=18.0,
+                                    min_value=3.0, max_value=20.0,
                                     value=float(default_discount),
                                     step=0.25, format="%.2f", key="dcf_discount",
                                 )
@@ -1670,6 +1670,18 @@ with tab2:
                                     value=float(default_terminal),
                                     step=0.25, format="%.2f", key="dcf_terminal",
                                 )
+
+                            # WACC breakdown
+                            _wb = assumptions.get("wacc_breakdown", {})
+                            if _wb and _wb.get("weight_debt", 0) > 0:
+                                st.caption(
+                                    f"WACC = ({_wb.get('weight_equity', 0):.0f}% equity × "
+                                    f"{_wb.get('cost_of_equity', 0):.1f}% CoE) + "
+                                    f"({_wb.get('weight_debt', 0):.0f}% debt × "
+                                    f"{_wb.get('cost_of_debt', 0):.1f}% CoD × "
+                                    f"(1 - {_wb.get('effective_tax_rate', 0):.0f}% tax))"
+                                )
+
                             recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
                         dcf_display = _dcf
@@ -1781,7 +1793,7 @@ with tab2:
                             with wacc_term_cols_r[0]:
                                 user_discount_r = st.number_input(
                                     f"Discount Rate / WACC (%)  ·  Beta: {_rev_assumptions.get('beta', 1.0):.2f}",
-                                    min_value=5.0, max_value=18.0,
+                                    min_value=3.0, max_value=20.0,
                                     value=float(_default_discount_r),
                                     step=0.25, format="%.2f", key="dcf_rev_discount",
                                 )
@@ -1792,6 +1804,18 @@ with tab2:
                                     value=float(_default_terminal_r),
                                     step=0.25, format="%.2f", key="dcf_rev_terminal",
                                 )
+
+                            # WACC breakdown
+                            _wb_r = _rev_assumptions.get("wacc_breakdown", {})
+                            if _wb_r and _wb_r.get("weight_debt", 0) > 0:
+                                st.caption(
+                                    f"WACC = ({_wb_r.get('weight_equity', 0):.0f}% equity × "
+                                    f"{_wb_r.get('cost_of_equity', 0):.1f}% CoE) + "
+                                    f"({_wb_r.get('weight_debt', 0):.0f}% debt × "
+                                    f"{_wb_r.get('cost_of_debt', 0):.1f}% CoD × "
+                                    f"(1 - {_wb_r.get('effective_tax_rate', 0):.0f}% tax))"
+                                )
+
                             recalc_rev = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
                         dcf_display = _rev_dcf_init
