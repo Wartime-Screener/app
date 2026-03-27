@@ -554,54 +554,46 @@ with tab2:
             except Exception:
                 continue
 
-    # Direct ticker search — type any symbol
-    _direct_ticker = st.text_input(
+    # Build master ticker list from ALL universes for the searchable dropdown
+    @st.cache_data(ttl=3600)
+    def _load_all_tickers():
+        """Load every ticker from every universe CSV into one list."""
+        all_frames = []
+        for _fn in dd_uni_map.values():
+            try:
+                all_frames.append(load_universe(_fn))
+            except Exception:
+                continue
+        if not all_frames:
+            return pd.DataFrame(columns=["ticker", "company_name", "segment"])
+        df = pd.concat(all_frames, ignore_index=True).drop_duplicates(subset="ticker", keep="first")
+        return df.sort_values("ticker").reset_index(drop=True)
+
+    _master_df = _load_all_tickers()
+    _master_options = [""] + _master_df["ticker"].tolist()
+    _master_labels = {"": "🔍 Type to search any ticker..."}
+    _master_labels.update({
+        row["ticker"]: f"{row['ticker']} — {row.get('company_name', '')}"
+        for _, row in _master_df.iterrows() if row.get("company_name")
+    })
+
+    # If jumping from screener, pre-set the search dropdown
+    if _jump_ticker and _jump_ticker in _master_options:
+        st.session_state["dd_search_ticker"] = _jump_ticker
+
+    _search_ticker = st.selectbox(
         "🔍 Search any ticker",
-        placeholder="Type a ticker symbol (e.g. AAPL, TSLA, BAH)...",
-        help="Enter any US-listed ticker symbol directly — no need to select an industry first.",
-        key="dd_direct_ticker",
-    ).strip().upper()
-
-    st.caption("— or browse by industry —")
-
-    dd_display = st.multiselect(
-        "Select Industries",
-        options=sorted(dd_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
-        default=[],
-        help="Choose one or more industries to load tickers from. ⚠️ = inverse plays.",
-        key="dd_universes",
+        options=_master_options,
+        format_func=lambda t: _master_labels.get(t, t),
+        help="Start typing to search across all industries. Select a ticker to auto-analyze.",
+        key="dd_search_ticker",
     )
-    dd_universes = [dd_uni_map[d] for d in dd_display]
 
-    # Build ticker list from selected universes only
-    ticker_options = []
-    ticker_labels = {}
-    all_tickers_df = pd.DataFrame()
-    if dd_universes:
-        frames = [load_universe(u) for u in dd_universes]
-        all_tickers_df = pd.concat(frames, ignore_index=True).drop_duplicates(subset="ticker", keep="first")
-        ticker_options = sorted(all_tickers_df["ticker"].unique().tolist())
-        ticker_labels = {
-            row["ticker"]: f"{row['ticker']} — {row['company_name']}"
-            for _, row in all_tickers_df.iterrows() if row.get("company_name")
-        }
+    # Determine selected ticker
+    selected_ticker = _search_ticker if _search_ticker else None
 
-    # Determine selected ticker: direct search takes priority
-    if _direct_ticker:
-        selected_ticker = _direct_ticker
-    else:
-        # If jumping, force-set the selectbox to the clicked ticker
-        if _jump_ticker and _jump_ticker in ticker_options:
-            st.session_state["dd_ticker_select"] = _jump_ticker
-
-        selected_ticker = st.selectbox(
-            "Select Ticker",
-            options=ticker_options,
-            index=0 if ticker_options else None,
-            format_func=lambda t: ticker_labels.get(t, t),
-            help="Choose a ticker for detailed fundamental analysis.",
-            key="dd_ticker_select",
-        ) if ticker_options else None
+    # Build all_tickers_df for universe info lookup
+    all_tickers_df = _master_df
 
     # Clear stale analysis if the user changed the ticker
     if "deep_dive" in st.session_state:
@@ -609,9 +601,10 @@ with tab2:
         if _prev_ticker and selected_ticker and _prev_ticker != selected_ticker:
             del st.session_state["deep_dive"]
 
-    # Auto-analyze if jumped from screener, or manual button click
+    # Auto-analyze: when a ticker is selected and no analysis exists yet, or jumped from screener
     _trigger_analyze = bool(_jump_ticker and selected_ticker)
-    if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze:
+    _needs_analysis = selected_ticker and "deep_dive" not in st.session_state
+    if (selected_ticker and st.button("Analyze", key="deep_dive_btn")) or _trigger_analyze or _needs_analysis:
         if not fmp.is_configured:
             st.error("FMP API key is required for deep dive analysis. Set FMP_API_KEY.")
         else:
