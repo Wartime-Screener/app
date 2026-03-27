@@ -32,8 +32,6 @@ RATIO_FIELD_MAP = {
     "current_ratio": "currentRatio",
     "quick_ratio": "quickRatio",
     "interest_coverage": "interestCoverageRatio",
-    "dividend_yield": "dividendYieldPercentage",
-    "dividend_payout_ratio": "dividendPayoutRatio",
     "price_to_fcf": "priceToFreeCashFlowRatio",
     "peg_ratio": "priceToEarningsGrowthRatio",
     "debt_to_assets": "debtToAssetsRatio",
@@ -980,13 +978,66 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         target_fcf_margin = 0.10  # conservative 10% default
         warnings.append("No positive historical FCF margin — using 10% default target")
 
-    # --- Discount rate ---
+    # --- WACC calculation (proper weighted average) ---
     risk_free_rate = 0.043
     equity_risk_premium = 0.055
     beta = _safe_float(profile.get("beta")) or 1.0
     if beta < 0.3:
         beta = 1.0
-    default_wacc = risk_free_rate + beta * equity_risk_premium
+
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+
+    market_cap = _safe_float(profile.get("mktCap") or profile.get("marketCap")) or 0
+    total_debt_for_wacc = 0.0
+    cost_of_debt = 0.0
+    effective_tax_rate = 0.25
+    wacc_breakdown = {}
+
+    if balance_sheets and income_statements and market_cap > 0:
+        latest_bs = balance_sheets[0]
+        latest_is = income_statements[0]
+
+        total_debt_for_wacc = _safe_float(
+            latest_bs.get("totalDebt") or latest_bs.get("longTermDebt")
+        ) or 0
+
+        interest_expense = abs(_safe_float(latest_is.get("interestExpense")) or 0)
+        pre_tax_income = _safe_float(latest_is.get("incomeBeforeTax")) or 0
+        income_tax = _safe_float(latest_is.get("incomeTaxExpense")) or 0
+
+        if total_debt_for_wacc > 0 and interest_expense > 0:
+            cost_of_debt = interest_expense / total_debt_for_wacc
+            cost_of_debt = max(0.02, min(0.20, cost_of_debt))
+        else:
+            cost_of_debt = 0.05
+
+        if pre_tax_income > 0 and income_tax > 0:
+            effective_tax_rate = min(0.40, max(0.0, income_tax / pre_tax_income))
+
+    total_capital = market_cap + total_debt_for_wacc
+    if total_capital > 0 and total_debt_for_wacc > 0:
+        weight_equity = market_cap / total_capital
+        weight_debt = total_debt_for_wacc / total_capital
+        default_wacc = (weight_equity * cost_of_equity) + (weight_debt * cost_of_debt * (1 - effective_tax_rate))
+        wacc_breakdown = {
+            "cost_of_equity": round(cost_of_equity * 100, 2),
+            "cost_of_debt": round(cost_of_debt * 100, 2),
+            "effective_tax_rate": round(effective_tax_rate * 100, 1),
+            "weight_equity": round(weight_equity * 100, 1),
+            "weight_debt": round(weight_debt * 100, 1),
+            "market_cap": market_cap,
+            "total_debt": total_debt_for_wacc,
+        }
+    else:
+        default_wacc = cost_of_equity
+        wacc_breakdown = {
+            "cost_of_equity": round(cost_of_equity * 100, 2),
+            "cost_of_debt": 0,
+            "effective_tax_rate": round(effective_tax_rate * 100, 1),
+            "weight_equity": 100.0,
+            "weight_debt": 0.0,
+        }
+
     discount_rate = discount_rate_override if discount_rate_override is not None else default_wacc
 
     # --- Terminal growth ---
@@ -1126,6 +1177,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "hist_median_fcf_margin": round(hist_median_fcf_margin * 100, 1) if hist_median_fcf_margin is not None else None,
             "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
             "analyst_num_analysts": analyst_num_analysts,
+            "wacc_breakdown": wacc_breakdown,
         },
         "projected_fcfs": projected_fcfs,
         "terminal_value": round(terminal_value, 0),
@@ -1405,8 +1457,6 @@ def flag_opportunities(metrics: dict, higher_is_better: set | None = None,
         "quick_ratio": "Quick Ratio",
         "interest_coverage": "Interest Coverage",
         "earnings_yield": "Earnings Yield",
-        "dividend_yield": "Dividend Yield",
-        "dividend_payout_ratio": "Dividend Payout Ratio",
         "price_to_fcf": "P/FCF",
         "peg_ratio": "PEG Ratio",
         "roic": "ROIC",

@@ -462,7 +462,7 @@ analyze a specific company.*"""
             "gross_margin", "operating_margin", "net_margin",
             "roe", "roa", "roic",
             "current_ratio", "quick_ratio", "interest_coverage",
-            "fcf_yield", "earnings_yield", "dividend_yield",
+            "fcf_yield", "earnings_yield",
         }
 
         def color_percentile(val, col_name):
@@ -780,8 +780,6 @@ with tab2:
                 "current_ratio": "Current Ratio", "quick_ratio": "Quick Ratio",
                 "interest_coverage": "Interest Coverage",
                 "earnings_yield": "Earnings Yield",
-                "dividend_yield": "Dividend Yield",
-                "dividend_payout_ratio": "Dividend Payout Ratio",
                 "price_to_fcf": "P/FCF",
                 "peg_ratio": "PEG Ratio",
                 "roic": "ROIC",
@@ -798,7 +796,6 @@ with tab2:
                 "roe", "roa", "roic",
                 "current_ratio", "quick_ratio", "interest_coverage",
                 "fcf_yield", "earnings_yield",
-                "dividend_yield",
                 "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
             }
 
@@ -807,7 +804,6 @@ with tab2:
                 "gross_margin", "operating_margin", "net_margin",
                 "roe", "roa", "roic",
                 "fcf_yield", "earnings_yield",
-                "dividend_yield", "dividend_payout_ratio",
                 "debt_to_assets",
                 "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
             }
@@ -831,10 +827,7 @@ with tab2:
                 return val
 
             # Metrics to hide entirely when data is clearly garbage
-            _garbage_thresholds = {
-                "dividend_yield": 0.20,       # > 20% dividend yield is bad data
-                "dividend_payout_ratio": 5.0,  # > 500% payout ratio is bad data
-            }
+            _garbage_thresholds = {}
 
             rows = []
             percentiles = []
