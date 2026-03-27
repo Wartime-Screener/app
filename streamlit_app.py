@@ -1,7 +1,7 @@
 """
-Wartime Screener — Streamlit App
+Prospector — Streamlit App
 
-A fundamental analysis tool for conflict-impacted sectors. Uses Tradier for
+A fundamental analysis and stock screening tool. Uses Tradier for
 real-time quotes and Financial Modeling Prep for financial ratios, metrics,
 and statements. Scores stocks by percentile rank against their own history.
 
@@ -85,8 +85,8 @@ settings = load_settings()
 # Page config
 # ------------------------------------------------------------------ #
 st.set_page_config(
-    page_title=settings.get("app", {}).get("title", "Wartime Screener"),
-    page_icon="☢️",
+    page_title=settings.get("app", {}).get("title", "Prospector"),
+    page_icon="⛏️",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -170,7 +170,7 @@ edgar = get_edgar_client()
 # ---------------------------------------------------------------------------
 # Portfolio — browser localStorage backend
 # ---------------------------------------------------------------------------
-_LS_KEY = "wartime_screener_portfolio"
+_LS_KEY = "prospector_portfolio"
 
 
 def _init_portfolio_from_localstorage():
@@ -262,7 +262,7 @@ def universe_display_map() -> dict[str, str]:
 # ------------------------------------------------------------------ #
 # Sidebar — API status
 # ------------------------------------------------------------------ #
-st.title("☢️ Wartime Screener")
+st.title("⛏️ Prospector")
 
 # API status as a collapsible expander in the header area
 from src.transcript_summarizer import is_configured as _anthropic_ok
@@ -330,15 +330,11 @@ with tab1:
     st.header("Screener Dashboard")
 
     st.markdown(
-        """**Markets move fast during conflict. This tool helps you keep up.**
+        """**Dig deeper. Find value others miss.**
 
-When war breaks out, entire sectors reprice overnight — energy, defense, shipping,
-agriculture, airlines. Some surge, some collapse. The problem isn't finding *a* play —
-it's maintaining a clear, systematic view across all of them while the news cycle is screaming.
-
-The Wartime Screener tracks companies disproportionately impacted by conflict, organized
-by industry and thesis. Scan for undervalued tickers, compare fundamentals across peers,
-and stress-test your assumptions with our multi-stage DCF model.
+Prospector is a fundamental analysis tool built for investors who want to do their own work.
+Scan industries, compare peers, read earnings transcripts, and stress-test your assumptions
+with a multi-stage DCF model — all in one place.
 
 *Start by selecting an industry below, or jump straight to the Ticker Deep Dive tab to
 analyze a specific company.*"""
@@ -2792,7 +2788,7 @@ with tab7:
             ap_cols2 = st.columns([1, 1])
             with ap_cols2[0]:
                 existing_tags = get_all_tags()
-                preset_tags = ["High FCF Growth", "Low P/E", "Wartime Catalyst", "Dividend Compounder",
+                preset_tags = ["High FCF Growth", "Low P/E", "Catalyst", "Dividend Compounder",
                                "Turnaround Play", "Momentum", "Energy Exposure", "Defense/Intel", "Custom"]
                 all_tag_options = sorted(set(preset_tags + existing_tags))
                 ap_tag = st.selectbox("Thesis Tag", all_tag_options, index=0)
@@ -3200,7 +3196,7 @@ with tab7:
         st.download_button(
             "⬇️ Export Portfolio (JSON)",
             data=_export_data,
-            file_name="wartime_portfolio.json",
+            file_name="prospector_portfolio.json",
             mime="application/json",
             use_container_width=True,
         )
