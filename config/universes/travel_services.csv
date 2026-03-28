@@ -1,3 +1,10 @@
 ticker,company_name,segment,sub_segment
+ABNB,"Airbnb, Inc.",travel_services,
+BKNG,Booking Holdings Inc.,travel_services,
+EXPE,"Expedia Group, Inc.",travel_services,
+LIND,"Lindblad Expeditions Holdings, Inc.",travel_services,
+NCLH,Norwegian Cruise Line Holdings Ltd.,travel_services,
+RCL,Royal Caribbean Cruises Ltd.,travel_services,
 SABR,Sabre Corporation,travel_services,
+TNL,Travel + Leisure Co.,travel_services,
 TRIP,"Tripadvisor, Inc.",travel_services,
