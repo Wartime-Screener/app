@@ -1,9 +1,5 @@
 ticker,company_name,segment,sub_segment
-AGCC,Agencia Comercial Spirits Ltd,beverages_wineries_and_distilleries,
-DEO,Diageo plc,beverages_wineries_and_distilleries,
-EPSM,Epsium Enterprise Limited Ordinary Shares,beverages_wineries_and_distilleries,
-IBG,Innovation Beverage Group Limited,beverages_wineries_and_distilleries,
-MGPI,"MGP Ingredients, Inc.",beverages_wineries_and_distilleries,
+BF-B,Brown-Forman Corporation,beverages_wineries_and_distilleries,
+NAPA,"The Duckhorn Portfolio, Inc.",beverages_wineries_and_distilleries,
+RYZ,Ryerson Holding Corporation,beverages_wineries_and_distilleries,
 STZ,"Constellation Brands, Inc.",beverages_wineries_and_distilleries,
-WVVI,"Willamette Valley Vineyards, Inc.",beverages_wineries_and_distilleries,
-WVVIP,"Willamette Valley Vineyards, Inc.",beverages_wineries_and_distilleries,

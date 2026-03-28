@@ -1,4 +1,6 @@
 ticker,company_name,segment,sub_segment
-TBCH,Turtle Beach Corporation,consumer_electronics,
-WLDS,Wearable Devices Ltd.,consumer_electronics,
-WLDSW,Wearable Devices Ltd.,consumer_electronics,
+AAPL,Apple Inc.,consumer_electronics,
+BWSN,"Babcock & Wilcox Enterprises, I",consumer_electronics,
+NXT,Nextpower Inc.,consumer_electronics,
+SONO,"Sonos, Inc.",consumer_electronics,
+VZIO,VIZIO Holding Corp.,consumer_electronics,

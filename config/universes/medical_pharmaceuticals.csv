@@ -1,3 +1,5 @@
 ticker,company_name,segment,sub_segment
-PETS,"PetMed Express, Inc.",medical_pharmaceuticals,
-YI,"111, Inc.",medical_pharmaceuticals,
+CGEM,"Cullinan Therapeutics, Inc.",medical_pharmaceuticals,
+DMRA,"Galecto, Inc.",medical_pharmaceuticals,
+ONC,BeOne Medicines Ltd.,medical_pharmaceuticals,
+WBA,"Walgreens Boots Alliance, Inc.",medical_pharmaceuticals,

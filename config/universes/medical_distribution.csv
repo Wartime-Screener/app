@@ -1,3 +1,9 @@
 ticker,company_name,segment,sub_segment
+ABC,AmerisourceBergen Corporation,medical_distribution,
+CAH,"Cardinal Health, Inc.",medical_distribution,
+COR,"Cencora, Inc.",medical_distribution,
 GRDN,"Guardian Pharmacy Services, Inc.",medical_distribution,
-RDGT,Ridgetech Inc.,medical_distribution,
+HSIC,"Henry Schein, Inc.",medical_distribution,
+MCK,McKesson Corporation,medical_distribution,
+PBH,Prestige Consumer Healthcare Inc.,medical_distribution,
+PDCO,"Patterson Companies, Inc.",medical_distribution,

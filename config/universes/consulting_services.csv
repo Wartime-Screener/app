@@ -1,3 +1,10 @@
 ticker,company_name,segment,sub_segment
-EPOW,E-Power Inc. Class A,consulting_services,
-RGP,"Resources Connection, Inc.",consulting_services,
+BAH,Booz Allen Hamilton Holding Corporation,consulting_services,
+CRAI,"CRA International, Inc.",consulting_services,
+EFX,Equifax Inc.,consulting_services,
+EXPO,"Exponent, Inc.",consulting_services,
+FCN,"FTI Consulting, Inc.",consulting_services,
+HURN,Huron Consulting Group Inc.,consulting_services,
+ICFI,"ICF International, Inc.",consulting_services,
+TRU,TransUnion,consulting_services,
+VRSK,"Verisk Analytics, Inc.",consulting_services,

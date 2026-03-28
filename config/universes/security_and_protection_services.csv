@@ -1,4 +1,11 @@
 ticker,company_name,segment,sub_segment
-KSCP,"Knightscope, Inc.",security_and_protection_services,
+ADT,ADT Inc.,security_and_protection_services,
+ARLO,"Arlo Technologies, Inc.",security_and_protection_services,
+BCO,The Brink's Company,security_and_protection_services,
+BRC,Brady Corporation,security_and_protection_services,
+EVLV,"Evolv Technologies Holdings, Inc.",security_and_protection_services,
+GEO,"The GEO Group, Inc.",security_and_protection_services,
+MSA,MSA Safety Incorporated,security_and_protection_services,
 NSSC,"Napco Security Technologies, Inc.",security_and_protection_services,
-SNT,Senstar Technologies Ltd.,security_and_protection_services,
+REZI,"Resideo Technologies, Inc.",security_and_protection_services,
+VVNT,"Vivint Smart Home, Inc.",security_and_protection_services,

@@ -1,6 +1,8 @@
 ticker,company_name,segment,sub_segment
 ARW,"Arrow Electronics, Inc.",technology_distributors,
 AVT,"Avnet, Inc.",technology_distributors,
-CLMB,"Climb Global Solutions, Inc.",technology_distributors,
+CNXN,"PC Connection, Inc.",technology_distributors,
+NSIT,"Insight Enterprises, Inc.",technology_distributors,
 SCSC,"ScanSource, Inc.",technology_distributors,
+SNPO,Snap One Holdings Corp.,technology_distributors,
 SNX,TD SYNNEX Corporation,technology_distributors,

@@ -1,13 +1,7 @@
 ticker,company_name,segment,sub_segment
-CNI,Canadian National Railway Company,railroads,
-CP,Canadian Pacific Kansas City Ltd.,railroads,
 CSX,CSX Corporation,railroads,
-FSTR,L.B. Foster Company,railroads,
 GBX,"The Greenbrier Companies, Inc.",railroads,
 NSC,Norfolk Southern Corporation,railroads,
-RAIL,"FreightCar America, Inc.",railroads,
-RVSN,Rail Vision Ltd.,railroads,
-RVSNW,Rail Vision Ltd.,railroads,
 TRN,"Trinity Industries, Inc.",railroads,
 UNP,Union Pacific Corporation,railroads,
 WAB,Westinghouse Air Brake Technologies Corporation,railroads,
