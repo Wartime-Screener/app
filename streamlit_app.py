@@ -86,7 +86,7 @@ settings = load_settings()
 # ------------------------------------------------------------------ #
 st.set_page_config(
     page_title=settings.get("app", {}).get("title", "GoldRatio"),
-    page_icon="φ",
+    page_icon="assets/favicon.png",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
