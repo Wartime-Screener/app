@@ -86,7 +86,7 @@ settings = load_settings()
 # ------------------------------------------------------------------ #
 st.set_page_config(
     page_title=settings.get("app", {}).get("title", "GoldRatio"),
-    page_icon="✦",
+    page_icon="φ",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -262,7 +262,7 @@ def universe_display_map() -> dict[str, str]:
 # ------------------------------------------------------------------ #
 # Sidebar — API status
 # ------------------------------------------------------------------ #
-st.title("✦ GoldRatio")
+st.title("φ GoldRatio")
 
 # API status as a collapsible expander in the header area
 from src.transcript_summarizer import is_configured as _anthropic_ok
