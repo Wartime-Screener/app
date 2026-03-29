@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Wartime Screener",
+    "title": "GoldRatio",
     "port": 8502
   },
   "cache_ttl": {
