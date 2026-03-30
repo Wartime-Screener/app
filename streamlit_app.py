@@ -345,13 +345,9 @@ _TAB_OPTIONS = [
     "Settings",
 ]
 
-if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = _TAB_OPTIONS[0]
-
 active_tab = st.radio(
     "Navigation",
     _TAB_OPTIONS,
-    index=_TAB_OPTIONS.index(st.session_state["active_tab"]),
     horizontal=True,
     label_visibility="collapsed",
     key="active_tab",
