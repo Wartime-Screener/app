@@ -345,6 +345,10 @@ _TAB_OPTIONS = [
     "Settings",
 ]
 
+# Handle pending tab navigation (e.g., from screener row click)
+if "pending_tab" in st.session_state:
+    st.session_state["active_tab"] = st.session_state.pop("pending_tab")
+
 active_tab = st.radio(
     "Navigation",
     _TAB_OPTIONS,
@@ -535,7 +539,7 @@ analyze a specific company.*"""
             clicked_row = event.selection.rows[0]
             clicked_ticker = display_df.iloc[clicked_row]["Ticker"]
             st.session_state["jump_to_ticker"] = clicked_ticker
-            st.session_state["active_tab"] = "Ticker Deep Dive"
+            st.session_state["pending_tab"] = "Ticker Deep Dive"
             st.rerun()
 
         # Export button
