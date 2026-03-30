@@ -104,6 +104,29 @@ details summary span p {
     font-size: 1.4rem !important;
     font-weight: 700 !important;
 }
+/* Style horizontal radio as tab bar */
+div[data-testid="stRadio"] > div {
+    flex-wrap: wrap;
+    gap: 0 !important;
+    border-bottom: 2px solid rgba(255,255,255,0.1);
+    padding-bottom: 0;
+}
+div[data-testid="stRadio"] > div > label {
+    padding: 0.5rem 1rem !important;
+    margin: 0 !important;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-weight: 500;
+    transition: border-color 0.2s;
+}
+div[data-testid="stRadio"] > div > label[data-checked="true"] {
+    border-bottom-color: #ff4b4b;
+    font-weight: 600;
+}
+/* Hide the radio dot */
+div[data-testid="stRadio"] > div > label > div:first-child {
+    display: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -309,9 +332,9 @@ with st.expander(_api_label, expanded=False):
         )
 
 # ------------------------------------------------------------------ #
-# Tabs
+# Tab Navigation (radio-based for rerun persistence)
 # ------------------------------------------------------------------ #
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+_TAB_OPTIONS = [
     "Screener Dashboard",
     "Ticker Deep Dive",
     "Ratio Comparison",
@@ -320,19 +343,31 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Commodity Prices",
     "Portfolio Tracker",
     "Settings",
-])
+]
+
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = _TAB_OPTIONS[0]
+
+active_tab = st.radio(
+    "Navigation",
+    _TAB_OPTIONS,
+    index=_TAB_OPTIONS.index(st.session_state["active_tab"]),
+    horizontal=True,
+    label_visibility="collapsed",
+    key="active_tab",
+)
 
 
 # ================================================================== #
 # TAB 1: Screener Dashboard
 # ================================================================== #
-with tab1:
+if active_tab == "Screener Dashboard":
     st.header("Screener Dashboard")
 
     st.markdown(
         """**Dig deeper. Find value others miss.**
 
-Prospector is a fundamental analysis tool built for investors who want to do their own work.
+GoldRatio is a fundamental analysis tool built for investors who want to do their own work.
 Scan industries, compare peers, read earnings transcripts, and stress-test your assumptions
 with a multi-stage DCF model — all in one place.
 
@@ -504,14 +539,8 @@ analyze a specific company.*"""
             clicked_row = event.selection.rows[0]
             clicked_ticker = display_df.iloc[clicked_row]["Ticker"]
             st.session_state["jump_to_ticker"] = clicked_ticker
-            # Use JS to click the "Ticker Deep Dive" tab (2nd tab, index 1)
-            streamlit_js_eval(
-                js_expressions="""
-                const tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
-                if (tabs.length > 1) { tabs[1].click(); }
-                """,
-                key="click_deep_dive_tab",
-            )
+            st.session_state["active_tab"] = "Ticker Deep Dive"
+            st.rerun()
 
         # Export button
         with col_export:
@@ -533,7 +562,7 @@ analyze a specific company.*"""
 # ================================================================== #
 # TAB 2: Ticker Deep Dive
 # ================================================================== #
-with tab2:
+elif active_tab == "Ticker Deep Dive":
     st.header("Ticker Deep Dive")
 
     # --- Handle jump from Screener Dashboard click ---
@@ -1982,7 +2011,7 @@ with tab2:
 # ================================================================== #
 # TAB 3: Ratio Comparison
 # ================================================================== #
-with tab3:
+elif active_tab == "Ratio Comparison":
     st.header("Ratio Comparison")
 
     # Universe selector — pick which universes to draw tickers from
@@ -2118,7 +2147,7 @@ with tab3:
 # ================================================================== #
 # TAB 4: Balance Sheet Health
 # ================================================================== #
-with tab4:
+elif active_tab == "Balance Sheet Health":
     st.header("Balance Sheet Health")
 
     st.write(
@@ -2253,7 +2282,7 @@ with tab4:
 # ================================================================== #
 # TAB 5: EIA Inventories
 # ================================================================== #
-with tab5:
+elif active_tab == "EIA Inventories":
     st.header("EIA Inventories")
 
     if not eia.is_configured:
@@ -2429,7 +2458,7 @@ with tab5:
 # ------------------------------------------------------------------ #
 # Tab 6 — Commodity Prices
 # ------------------------------------------------------------------ #
-with tab6:
+elif active_tab == "Commodity Prices":
     st.header("Commodity Prices")
     st.write("Live and historical commodity prices from EIA (energy) and Yahoo Finance (metals & agriculture).")
 
@@ -2839,7 +2868,7 @@ with tab6:
 # ------------------------------------------------------------------ #
 # Tab 7 — Portfolio Tracker
 # ------------------------------------------------------------------ #
-with tab7:
+elif active_tab == "Portfolio Tracker":
     st.header("Portfolio Tracker")
     st.caption("Track positions, measure performance, and test investment hypotheses.")
 
@@ -3296,7 +3325,7 @@ with tab7:
 # ------------------------------------------------------------------ #
 # Tab 8 — Settings
 # ------------------------------------------------------------------ #
-with tab8:
+elif active_tab == "Settings":
     st.header("Settings")
 
     # Cache TTLs
