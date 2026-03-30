@@ -564,6 +564,7 @@ analyze a specific company.*"""
 # ================================================================== #
 elif active_tab == "Ticker Deep Dive":
     st.header("Ticker Deep Dive")
+    history_years = st.session_state.get("history_years", 10)
 
     # --- Handle jump from Screener Dashboard click ---
     _jump_ticker = st.session_state.pop("jump_to_ticker", None)
@@ -2013,6 +2014,7 @@ elif active_tab == "Ticker Deep Dive":
 # ================================================================== #
 elif active_tab == "Ratio Comparison":
     st.header("Ratio Comparison")
+    history_years = st.session_state.get("history_years", 10)
 
     # Universe selector — pick which universes to draw tickers from
     rc_uni_map = universe_display_map()
