@@ -1680,17 +1680,19 @@ elif active_tab == "Ticker Deep Dive":
 
                             wacc_term_cols = st.columns(2)
                             with wacc_term_cols[0]:
+                                _clamped_discount = max(3.0, min(20.0, float(default_discount)))
                                 user_discount = st.number_input(
                                     f"Discount Rate / WACC (%)  ·  Beta: {assumptions.get('beta', 1.0):.2f}",
                                     min_value=3.0, max_value=20.0,
-                                    value=float(default_discount),
+                                    value=_clamped_discount,
                                     step=0.25, format="%.2f", key="dcf_discount",
                                 )
                             with wacc_term_cols[1]:
+                                _clamped_terminal = max(1.0, min(4.0, float(default_terminal)))
                                 user_terminal = st.number_input(
                                     "Terminal Growth Rate (%)",
                                     min_value=1.0, max_value=4.0,
-                                    value=float(default_terminal),
+                                    value=_clamped_terminal,
                                     step=0.25, format="%.2f", key="dcf_terminal",
                                 )
 
@@ -2880,13 +2882,15 @@ elif active_tab == "Portfolio Tracker":
     # ---- Add Position Form ---- #
     with st.expander("➕ Add New Position", expanded=len(positions) == 0):
         with st.form("add_position_form", clear_on_submit=True):
-            ap_cols = st.columns([1, 1, 1])
+            ap_cols = st.columns([1, 1, 1, 1])
             with ap_cols[0]:
                 ap_ticker = st.text_input("Ticker", placeholder="e.g. BAH").upper().strip()
             with ap_cols[1]:
                 ap_date = st.date_input("Buy Date", value=datetime.now().date())
             with ap_cols[2]:
                 ap_amount = st.number_input("Amount Invested ($)", min_value=1.0, value=1000.0, step=100.0)
+            with ap_cols[3]:
+                ap_cost_basis = st.number_input("Cost Basis per Share (optional)", min_value=0.0, value=0.0, step=0.01, format="%.2f", help="Leave at 0 to auto-fetch the price for the selected date")
 
             ap_cols2 = st.columns([1, 1])
             with ap_cols2[0]:
@@ -2905,34 +2909,40 @@ elif active_tab == "Portfolio Tracker":
             tag = ap_custom_tag.strip() if ap_tag == "Custom" and ap_custom_tag.strip() else ap_tag
             buy_date_str = ap_date.strftime("%Y-%m-%d")
 
-            # Get cost basis: use historical price for past dates, live for today
-            try:
-                if ap_date == datetime.now().date():
-                    quotes_df = tradier.get_quotes([ap_ticker])
-                    if quotes_df is not None and not quotes_df.empty:
-                        cost = float(quotes_df.iloc[0]["last"])
+            # Use manual cost basis if provided, otherwise auto-fetch
+            if ap_cost_basis > 0:
+                cost = ap_cost_basis
+                new_pos = add_position(ap_ticker, buy_date_str, ap_amount, cost, tag, ap_notes)
+                st.success(f"Added {new_pos['shares']:.4f} shares of {ap_ticker} at ${cost:.2f} (manual)")
+                st.rerun()
+            else:
+                try:
+                    if ap_date == datetime.now().date():
+                        quotes_df = tradier.get_quotes([ap_ticker])
+                        if quotes_df is not None and not quotes_df.empty:
+                            cost = float(quotes_df.iloc[0]["last"])
+                        else:
+                            st.error(f"Could not get quote for {ap_ticker}")
+                            cost = None
                     else:
-                        st.error(f"Could not get quote for {ap_ticker}")
-                        cost = None
-                else:
-                    import yfinance as yf
-                    hist = yf.download(ap_ticker, start=buy_date_str,
-                                       end=(ap_date + timedelta(days=5)).strftime("%Y-%m-%d"),
-                                       progress=False)
-                    if hist.empty:
-                        st.error(f"No historical price data for {ap_ticker} on {buy_date_str}")
-                        cost = None
-                    else:
-                        if isinstance(hist.columns, pd.MultiIndex):
-                            hist.columns = hist.columns.get_level_values(0)
-                        cost = float(hist["Close"].iloc[0])
+                        import yfinance as yf
+                        hist = yf.download(ap_ticker, start=buy_date_str,
+                                           end=(ap_date + timedelta(days=5)).strftime("%Y-%m-%d"),
+                                           progress=False)
+                        if hist.empty:
+                            st.error(f"No historical price data for {ap_ticker} on {buy_date_str}")
+                            cost = None
+                        else:
+                            if isinstance(hist.columns, pd.MultiIndex):
+                                hist.columns = hist.columns.get_level_values(0)
+                            cost = float(hist["Close"].iloc[0])
 
-                if cost and cost > 0:
-                    new_pos = add_position(ap_ticker, buy_date_str, ap_amount, cost, tag, ap_notes)
-                    st.success(f"Added {new_pos['shares']:.4f} shares of {ap_ticker} at ${cost:.2f}")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Error adding position: {e}")
+                    if cost and cost > 0:
+                        new_pos = add_position(ap_ticker, buy_date_str, ap_amount, cost, tag, ap_notes)
+                        st.success(f"Added {new_pos['shares']:.4f} shares of {ap_ticker} at ${cost:.2f}")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error adding position: {e}")
 
     # ---- Portfolio Summary ---- #
     if positions:
