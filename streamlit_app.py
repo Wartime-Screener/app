@@ -1680,17 +1680,19 @@ elif active_tab == "Ticker Deep Dive":
 
                             wacc_term_cols = st.columns(2)
                             with wacc_term_cols[0]:
+                                _clamped_discount = max(3.0, min(20.0, float(default_discount)))
                                 user_discount = st.number_input(
                                     f"Discount Rate / WACC (%)  ·  Beta: {assumptions.get('beta', 1.0):.2f}",
                                     min_value=3.0, max_value=20.0,
-                                    value=float(default_discount),
+                                    value=_clamped_discount,
                                     step=0.25, format="%.2f", key="dcf_discount",
                                 )
                             with wacc_term_cols[1]:
+                                _clamped_terminal = max(1.0, min(4.0, float(default_terminal)))
                                 user_terminal = st.number_input(
                                     "Terminal Growth Rate (%)",
                                     min_value=1.0, max_value=4.0,
-                                    value=float(default_terminal),
+                                    value=_clamped_terminal,
                                     step=0.25, format="%.2f", key="dcf_terminal",
                                 )
 
