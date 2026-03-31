@@ -42,11 +42,29 @@ def fetch_screener(min_market_cap: int) -> list[dict]:
         print(f"API Error: {data['Error Message']}", file=sys.stderr)
         sys.exit(1)
 
-    # Filter out ETFs and funds
-    stocks = [
-        d for d in data
-        if not d.get("isEtf") and not d.get("isFund") and d.get("industry")
-    ]
+    # Keywords that indicate a fund/ETF, not an operating company
+    FUND_KEYWORDS = re.compile(
+        r"\b(ETF|Fund|Trust|Portfolio|Index|CLO|BDC|REIT|Income|Growth|Dividend|"
+        r"Balanced|Bond|Equity|Shares|Notes|Warrant|Unit|Certificate|"
+        r"Interval|Closed.End|Open.End|Series|Class [A-Z]|NAV)\b",
+        re.IGNORECASE
+    )
+
+    def is_operating_company(d: dict) -> bool:
+        if d.get("isEtf") or d.get("isFund"):
+            return False
+        if not d.get("industry"):
+            return False
+        name = d.get("companyName", "")
+        # Ticker ends in X (mutual fund share class convention)
+        ticker = d.get("symbol", "")
+        if len(ticker) == 5 and ticker.endswith("X"):
+            return False
+        if FUND_KEYWORDS.search(name):
+            return False
+        return True
+
+    stocks = [d for d in data if is_operating_company(d)]
     return stocks
 
 

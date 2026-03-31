@@ -1,10 +1,7 @@
 ticker,company_name,segment,sub_segment
-APLE,"Apple Hospitality REIT, Inc.",reit_hotel_and_motel,
 DRH,DiamondRock Hospitality Company,reit_hotel_and_motel,
 HST,"Host Hotels & Resorts, Inc.",reit_hotel_and_motel,
-PEB,Pebblebrook Hotel Trust,reit_hotel_and_motel,
 PK,Park Hotels & Resorts Inc.,reit_hotel_and_motel,
 RHP,"Ryman Hospitality Properties, Inc.",reit_hotel_and_motel,
-RLJ,RLJ Lodging Trust,reit_hotel_and_motel,
 SHO,"Sunstone Hotel Investors, Inc.",reit_hotel_and_motel,
 XHR,"Xenia Hotels & Resorts, Inc.",reit_hotel_and_motel,

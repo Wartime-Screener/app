@@ -1,5 +1,4 @@
 ticker,company_name,segment,sub_segment
-ANGIV,Angi Inc. Class A Common Stock When Issued,internet_content_and_information,
 DASH,"DoorDash, Inc.",internet_content_and_information,
 DJT,Trump Media & Technology Group Corp.,internet_content_and_information,
 EVER,"EverQuote, Inc.",internet_content_and_information,
@@ -20,5 +19,3 @@ TBLA,Taboola.com Ltd.,internet_content_and_information,
 TWLO,Twilio Inc.,internet_content_and_information,
 TWTR,"Twitter, Inc. (delisted)",internet_content_and_information,
 YELP,Yelp Inc.,internet_content_and_information,
-Z,"Zillow Group, Inc. Class C",internet_content_and_information,
-ZG,"Zillow Group, Inc. Class A",internet_content_and_information,
