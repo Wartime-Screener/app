@@ -34,7 +34,7 @@ from src.commodity_client import (
     COMMODITY_SYMBOLS, get_commodity_quote, get_commodity_quote_by_symbol,
     get_commodity_history, clear_cache as clear_commodity_cache
 )
-from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, _load_scoring_config
+from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, _load_scoring_config
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
@@ -1988,6 +1988,101 @@ elif active_tab == "Ticker Deep Dive":
                             "🟡 Yellow = within ±30% of current (fairly valued)  ·  "
                             "🔴 Red = implied price < 90% of current (overvalued)"
                         )
+
+                    # --- Monte Carlo simulation ---
+                    _mc_assumptions = dcf_display.get("assumptions", {})
+                    _mc_base_fcf = _mc_assumptions.get("base_fcf")
+                    _mc_growth = _mc_assumptions.get("growth_rate")
+                    _mc_discount = _mc_assumptions.get("discount_rate")
+                    _mc_terminal = _mc_assumptions.get("terminal_growth")
+                    _mc_net_debt = _mc_assumptions.get("net_debt", 0)
+                    _mc_shares = _mc_assumptions.get("shares_outstanding")
+
+                    if all(v is not None for v in [_mc_base_fcf, _mc_growth, _mc_discount, _mc_terminal, _mc_shares]) and _mc_shares > 0 and _mc_base_fcf > 0:
+                        st.markdown("#### Monte Carlo Simulation")
+                        st.caption(
+                            f"10,000 simulations sampling growth ± {max(4.0, abs(_mc_growth) * 0.5):.1f}%, "
+                            f"WACC ± 1.5%, terminal ± 0.5% from your current assumptions."
+                        )
+
+                        _mc_result = run_dcf_monte_carlo(
+                            base_fcf=_mc_base_fcf,
+                            growth_rate=_mc_growth / 100,
+                            discount_rate=_mc_discount / 100,
+                            terminal_growth=_mc_terminal / 100,
+                            net_debt=_mc_net_debt,
+                            shares=_mc_shares,
+                            current_price=_dcf_current_price,
+                            projection_years=int(_mc_assumptions.get("projection_years", 10)),
+                        )
+
+                        _mc_stats = _mc_result.get("stats", {})
+                        _mc_upside_prob = _mc_result.get("upside_probability")
+                        _mc_prices = _mc_result.get("prices", [])
+
+                        # Key stats row
+                        _mc_cols = st.columns(5)
+                        with _mc_cols[0]:
+                            st.metric("10th Pct", f"${_mc_stats.get('p10', 0):,.2f}")
+                        with _mc_cols[1]:
+                            st.metric("25th Pct", f"${_mc_stats.get('p25', 0):,.2f}")
+                        with _mc_cols[2]:
+                            st.metric("Median", f"${_mc_stats.get('p50', 0):,.2f}")
+                        with _mc_cols[3]:
+                            st.metric("75th Pct", f"${_mc_stats.get('p75', 0):,.2f}")
+                        with _mc_cols[4]:
+                            st.metric("90th Pct", f"${_mc_stats.get('p90', 0):,.2f}")
+
+                        # Histogram
+                        if _mc_prices:
+                            _fig_mc = go.Figure()
+                            _fig_mc.add_trace(go.Histogram(
+                                x=_mc_prices,
+                                nbinsx=80,
+                                marker_color="rgba(100, 149, 237, 0.6)",
+                                marker_line_color="rgba(100, 149, 237, 0.9)",
+                                marker_line_width=0.5,
+                                name="Simulated Price",
+                            ))
+
+                            # Current price line
+                            if _dcf_current_price:
+                                _fig_mc.add_vline(
+                                    x=_dcf_current_price,
+                                    line_color="#f87171",
+                                    line_width=2,
+                                    line_dash="dash",
+                                    annotation_text=f"Current ${_dcf_current_price:.2f}",
+                                    annotation_position="top right",
+                                    annotation_font_color="#f87171",
+                                )
+
+                            # Median line
+                            _fig_mc.add_vline(
+                                x=_mc_stats.get("p50", 0),
+                                line_color="#4ade80",
+                                line_width=2,
+                                line_dash="dot",
+                                annotation_text=f"Median ${_mc_stats.get('p50', 0):.2f}",
+                                annotation_position="top left",
+                                annotation_font_color="#4ade80",
+                            )
+
+                            _upside_label = (
+                                f"{_mc_upside_prob:.1f}% of scenarios imply upside"
+                                if _mc_upside_prob is not None else ""
+                            )
+                            _fig_mc.update_layout(
+                                xaxis_title="Implied Price per Share ($)",
+                                yaxis_title="# Simulations",
+                                title=_upside_label,
+                                title_font_color="#4ade80" if (_mc_upside_prob or 0) >= 50 else "#f87171",
+                                height=380,
+                                template="plotly_dark",
+                                showlegend=False,
+                                margin={"t": 50},
+                            )
+                            st.plotly_chart(_fig_mc, use_container_width=True)
 
                     # --- Projected FCF chart ---
                     projected = dcf_display.get("projected_fcfs", [])
