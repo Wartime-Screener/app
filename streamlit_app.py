@@ -1715,6 +1715,27 @@ elif active_tab == "Ticker Deep Dive":
                                     f"{_rfr_label}"
                                 )
 
+                            # Debt paydown input
+                            _auto_paydown = assumptions.get("auto_debt_paydown")
+                            _net_debt_now = assumptions.get("net_debt", 0)
+                            _paydown_default = round((_auto_paydown or 0) / 1e6, 1)
+                            _paydown_help = (
+                                f"Auto-estimated from balance sheet history: ${_paydown_default:,.0f}M/yr. "
+                                f"Current net debt: ${_net_debt_now / 1e9:.2f}B. "
+                                "Set to 0 to use static net debt (no paydown modeled)."
+                            )
+                            if _net_debt_now > 0:
+                                user_debt_paydown = st.number_input(
+                                    "Annual Debt Paydown ($M)",
+                                    min_value=0.0, max_value=float(_net_debt_now / 1e6),
+                                    value=float(_paydown_default),
+                                    step=10.0, format="%.0f",
+                                    key="dcf_debt_paydown",
+                                    help=_paydown_help,
+                                )
+                            else:
+                                user_debt_paydown = 0.0
+
                             recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
                         dcf_display = _dcf
@@ -1740,6 +1761,7 @@ elif active_tab == "Ticker Deep Dive":
                                 analyst_estimates=_analysis.get("analyst_estimates", []),
                                 growth_stages=stages,
                                 risk_free_rate=_risk_free_rate,
+                                annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else None,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -1855,6 +1877,41 @@ elif active_tab == "Ticker Deep Dive":
                                     f"{_rfr_label_r}"
                                 )
 
+                            # Margin reversion + debt paydown row
+                            _rev_extra_cols = st.columns(2)
+                            with _rev_extra_cols[0]:
+                                _auto_paydown_r = _rev_assumptions.get("auto_debt_paydown")
+                                _net_debt_r = _rev_assumptions.get("net_debt", 0)
+                                _paydown_default_r = round((_auto_paydown_r or 0) / 1e6, 1)
+                                if _net_debt_r > 0:
+                                    user_debt_paydown_r = st.number_input(
+                                        "Annual Debt Paydown ($M)",
+                                        min_value=0.0, max_value=float(_net_debt_r / 1e6),
+                                        value=float(_paydown_default_r),
+                                        step=10.0, format="%.0f",
+                                        key="dcf_rev_debt_paydown",
+                                        help=(
+                                            f"Auto-estimated: ${_paydown_default_r:,.0f}M/yr from balance sheet history. "
+                                            f"Net debt today: ${_net_debt_r / 1e9:.2f}B. "
+                                            "Reduces net debt subtracted at terminal value."
+                                        ),
+                                    )
+                                else:
+                                    user_debt_paydown_r = 0.0
+                            with _rev_extra_cols[1]:
+                                _start_margin = _rev_assumptions.get("starting_fcf_margin", _default_fcf_margin)
+                                use_margin_rev = st.checkbox(
+                                    "FCF margin reversion",
+                                    value=True,
+                                    key="dcf_rev_margin_reversion",
+                                    help=(
+                                        f"When enabled, FCF margin starts at the most recent year's margin "
+                                        f"({_start_margin:.1f}%) and linearly converges to your target margin "
+                                        f"({_default_fcf_margin:.1f}%) by year 10. "
+                                        "Disable to apply target margin immediately from year 1."
+                                    ),
+                                )
+
                             recalc_rev = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
                         dcf_display = _rev_dcf_init
@@ -1881,6 +1938,8 @@ elif active_tab == "Ticker Deep Dive":
                                 analyst_estimates=_analysis.get("analyst_estimates", []),
                                 growth_stages=stages,
                                 risk_free_rate=_risk_free_rate,
+                                annual_debt_paydown=user_debt_paydown_r * 1e6 if user_debt_paydown_r else None,
+                                use_margin_reversion=use_margin_rev,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -1935,22 +1994,43 @@ elif active_tab == "Ticker Deep Dive":
                     if dcf_mode == "Revenue":
                         base_rev = assumptions_updated.get("base_revenue", 0)
                         fcf_margin = assumptions_updated.get("target_fcf_margin", 0)
+                        start_margin = assumptions_updated.get("starting_fcf_margin", fcf_margin)
+                        _rev_paydown = assumptions_updated.get("annual_debt_paydown", 0)
+                        _rev_nd_terminal = assumptions_updated.get("net_debt_at_terminal", 0)
+                        _margin_rev_on = assumptions_updated.get("use_margin_reversion", True)
+                        _margin_desc = (
+                            f"Margin: {start_margin:.1f}%→{fcf_margin:.1f}%"
+                            if _margin_rev_on and abs(start_margin - fcf_margin) > 0.1
+                            else f"FCF Margin: {fcf_margin:.1f}%"
+                        )
+                        _paydown_desc = (
+                            f"  ·  Debt paydown: ${_rev_paydown/1e6:.0f}M/yr → Net Debt@Y10: ${_rev_nd_terminal/1e9:.2f}B"
+                            if _rev_paydown > 0 else ""
+                        )
                         st.caption(
                             f"📊 Revenue-based  ·  Base Rev: ${base_rev/1e9:.2f}B  ·  "
-                            f"FCF Margin: {fcf_margin:.1f}%  ·  "
+                            f"{_margin_desc}  ·  "
                             f"{growth_desc}  ·  "
                             f"WACC: {user_discount:.2f}%  ·  "
                             f"Terminal: {user_terminal:.2f}%  ·  "
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
+                            f"{_paydown_desc}"
                         )
                     else:
                         base_fcf = assumptions_updated.get("base_fcf", 0)
+                        _fcf_paydown = assumptions_updated.get("annual_debt_paydown", 0)
+                        _fcf_nd_terminal = assumptions_updated.get("net_debt_at_terminal", 0)
+                        _fcf_paydown_desc = (
+                            f"  ·  Debt paydown: ${_fcf_paydown/1e6:.0f}M/yr → Net Debt@Y10: ${_fcf_nd_terminal/1e9:.2f}B"
+                            if _fcf_paydown > 0 else ""
+                        )
                         st.caption(
                             f"Base FCF: ${base_fcf/1e9:.2f}B  ·  "
                             f"{growth_desc}  ·  "
                             f"WACC: {user_discount:.2f}%  ·  "
                             f"Terminal: {user_terminal:.2f}%  ·  "
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
+                            f"{_fcf_paydown_desc}"
                         )
 
                     # --- Sensitivity table (the real value) ---
