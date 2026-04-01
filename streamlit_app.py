@@ -2072,11 +2072,28 @@ elif active_tab == "Ticker Deep Dive":
                     # --- Monte Carlo simulation ---
                     _mc_assumptions = dcf_display.get("assumptions", {})
                     _mc_base_fcf = _mc_assumptions.get("base_fcf")
-                    _mc_growth = _mc_assumptions.get("growth_rate")
                     _mc_discount = _mc_assumptions.get("discount_rate")
                     _mc_terminal = _mc_assumptions.get("terminal_growth")
-                    _mc_net_debt = _mc_assumptions.get("net_debt", 0)
+                    # Use net_debt_at_terminal so Monte Carlo is consistent with the main DCF
+                    _mc_net_debt = _mc_assumptions.get("net_debt_at_terminal",
+                                                        _mc_assumptions.get("net_debt", 0))
                     _mc_shares = _mc_assumptions.get("shares_outstanding")
+
+                    # Derive effective growth rate from user's actual slider values, not the
+                    # assumptions dict — in multi-stage mode the dict stores the historical CAGR
+                    # (used as a fallback default), not the user's phase rates.
+                    if dcf_mode == "FCF":
+                        if use_multistage:
+                            _total_stage_years = (p1_years + p2_years + p3_years) or 1
+                            _mc_growth = (
+                                p1_rate * p1_years
+                                + p2_rate * p2_years
+                                + p3_rate * p3_years
+                            ) / _total_stage_years
+                        else:
+                            _mc_growth = user_growth  # single-stage: exactly what the user set
+                    else:
+                        _mc_growth = None  # Revenue mode — no base_fcf, MC skipped below
 
                     if all(v is not None for v in [_mc_base_fcf, _mc_growth, _mc_discount, _mc_terminal, _mc_shares]) and _mc_shares > 0 and _mc_base_fcf > 0:
                         st.markdown("#### Monte Carlo Simulation")
