@@ -882,6 +882,128 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     }
 
 
+def run_dcf_monte_carlo(
+    base_fcf: float,
+    growth_rate: float,
+    discount_rate: float,
+    terminal_growth: float,
+    net_debt: float,
+    shares: float,
+    current_price: float | None,
+    projection_years: int = 10,
+    n_simulations: int = 10_000,
+    growth_std: float | None = None,
+    discount_std: float | None = None,
+    terminal_std: float | None = None,
+) -> dict:
+    """
+    Monte Carlo simulation over DCF assumptions.
+
+    Samples growth rate, discount rate, and terminal growth from normal
+    distributions centered on the base assumptions, runs N independent DCF
+    valuations, and returns the distribution of implied prices.
+
+    Args:
+        base_fcf: Starting free cash flow (dollars).
+        growth_rate: Central FCF growth rate (decimal).
+        discount_rate: Central WACC (decimal).
+        terminal_growth: Central terminal growth rate (decimal).
+        net_debt: Net debt for EV→equity bridge (dollars).
+        shares: Diluted shares outstanding.
+        current_price: Current stock price (for upside probability calc).
+        projection_years: DCF projection horizon.
+        n_simulations: Number of Monte Carlo iterations.
+        growth_std: Std dev of growth rate draws. Defaults to max(4%, half of abs(growth_rate)).
+        discount_std: Std dev of discount rate draws. Defaults to 1.5%.
+        terminal_std: Std dev of terminal growth draws. Defaults to 0.5%.
+
+    Returns:
+        Dict with prices (list), stats (dict), upside_probability, and
+        percentiles for histogram rendering.
+    """
+    rng = np.random.default_rng(seed=42)
+
+    # Default standard deviations — calibrated to give a meaningful spread
+    if growth_std is None:
+        growth_std = max(0.04, abs(growth_rate) * 0.5)
+    if discount_std is None:
+        discount_std = 0.015
+    if terminal_std is None:
+        terminal_std = 0.005
+
+    # Draw samples
+    growth_samples = rng.normal(growth_rate, growth_std, n_simulations)
+    discount_samples = rng.normal(discount_rate, discount_std, n_simulations)
+    terminal_samples = rng.normal(terminal_growth, terminal_std, n_simulations)
+
+    # Clamp to realistic bounds
+    growth_samples = np.clip(growth_samples, -0.20, 0.60)
+    discount_samples = np.clip(discount_samples, 0.04, 0.25)
+    terminal_samples = np.clip(terminal_samples, 0.005, 0.05)
+
+    # Ensure discount > terminal for every simulation
+    mask = discount_samples <= terminal_samples + 0.005
+    discount_samples[mask] = terminal_samples[mask] + 0.01
+
+    # Vectorised DCF — project FCFs and discount
+    # Shape: (n_simulations, projection_years)
+    years = np.arange(1, projection_years + 1)
+    growth_factors = (1 + growth_samples[:, None]) ** years          # (N, T)
+    discount_factors = (1 + discount_samples[:, None]) ** years      # (N, T)
+
+    fcf_projections = base_fcf * growth_factors                      # (N, T)
+    pv_fcfs = fcf_projections / discount_factors                     # (N, T)
+    sum_pv = pv_fcfs.sum(axis=1)                                     # (N,)
+
+    # Terminal value
+    terminal_fcf = fcf_projections[:, -1] * (1 + terminal_samples)
+    terminal_value = terminal_fcf / (discount_samples - terminal_samples)
+    terminal_pv = terminal_value / discount_factors[:, -1]
+
+    # Equity value per share
+    ev = sum_pv + terminal_pv
+    equity_value = ev - net_debt
+    prices = np.where(equity_value > 0, equity_value / shares, 0.0)
+
+    # Cap extreme outliers at 99th percentile for display
+    p99 = float(np.percentile(prices, 99))
+    prices_clipped = np.clip(prices, 0, p99)
+
+    # Stats
+    p10 = float(np.percentile(prices_clipped, 10))
+    p25 = float(np.percentile(prices_clipped, 25))
+    p50 = float(np.percentile(prices_clipped, 50))
+    p75 = float(np.percentile(prices_clipped, 75))
+    p90 = float(np.percentile(prices_clipped, 90))
+    mean = float(np.mean(prices_clipped))
+
+    upside_probability = None
+    if current_price and current_price > 0:
+        upside_probability = float(np.mean(prices_clipped > current_price) * 100)
+
+    return {
+        "prices": prices_clipped.tolist(),
+        "n_simulations": n_simulations,
+        "stats": {
+            "mean": round(mean, 2),
+            "p10": round(p10, 2),
+            "p25": round(p25, 2),
+            "p50": round(p50, 2),
+            "p75": round(p75, 2),
+            "p90": round(p90, 2),
+        },
+        "upside_probability": round(upside_probability, 1) if upside_probability is not None else None,
+        "assumptions": {
+            "growth_rate": round(growth_rate * 100, 2),
+            "growth_std": round(growth_std * 100, 2),
+            "discount_rate": round(discount_rate * 100, 2),
+            "discount_std": round(discount_std * 100, 2),
+            "terminal_growth": round(terminal_growth * 100, 2),
+            "terminal_std": round(terminal_std * 100, 2),
+        },
+    }
+
+
 def compute_revenue_dcf_valuation(income_statements: list[dict],
                                    cash_flow_statements: list[dict],
                                    profile: dict,
