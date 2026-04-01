@@ -190,6 +190,9 @@ eia = get_eia_client()
 fred = get_fred_client()
 edgar = get_edgar_client()
 
+# Fetch live 10-year Treasury yield for DCF (cached by FRED client)
+_risk_free_rate = fred.get_risk_free_rate() if fred.is_configured else None
+
 # ---------------------------------------------------------------------------
 # Portfolio — browser localStorage backend
 # ---------------------------------------------------------------------------
@@ -683,7 +686,8 @@ elif active_tab == "Ticker Deep Dive":
                     }
 
                 analysis = analyze_ticker(selected_ticker, fmp, universe_info,
-                                          history_years=history_years)
+                                          history_years=history_years,
+                                          risk_free_rate=_risk_free_rate)
 
             st.session_state["deep_dive"] = analysis
 
@@ -1699,12 +1703,16 @@ elif active_tab == "Ticker Deep Dive":
                             # WACC breakdown
                             _wb = assumptions.get("wacc_breakdown", {})
                             if _wb and _wb.get("weight_debt", 0) > 0:
+                                _rfr = assumptions.get("risk_free_rate")
+                                _rfr_src = "live" if _risk_free_rate is not None else "default"
+                                _rfr_label = f" · Risk-free rate: {_rfr:.2f}% ({_rfr_src})" if _rfr else ""
                                 st.caption(
                                     f"WACC = ({_wb.get('weight_equity', 0):.0f}% equity × "
                                     f"{_wb.get('cost_of_equity', 0):.1f}% CoE) + "
                                     f"({_wb.get('weight_debt', 0):.0f}% debt × "
                                     f"{_wb.get('cost_of_debt', 0):.1f}% CoD × "
                                     f"(1 - {_wb.get('effective_tax_rate', 0):.0f}% tax))"
+                                    f"{_rfr_label}"
                                 )
 
                             recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
@@ -1731,6 +1739,7 @@ elif active_tab == "Ticker Deep Dive":
                                 terminal_growth_override=user_terminal / 100.0,
                                 analyst_estimates=_analysis.get("analyst_estimates", []),
                                 growth_stages=stages,
+                                risk_free_rate=_risk_free_rate,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -1744,6 +1753,7 @@ elif active_tab == "Ticker Deep Dive":
                             profile=_analysis.get("profile", {}),
                             balance_sheets=_analysis.get("balance_sheets", []),
                             analyst_estimates=_analysis.get("analyst_estimates", []),
+                            risk_free_rate=_risk_free_rate,
                         )
                         _rev_assumptions = _rev_dcf_init.get("assumptions", {})
                         _default_rev_growth = max(min(_rev_assumptions.get("revenue_growth", 8.0), 75.0), -20.0)
@@ -1833,12 +1843,16 @@ elif active_tab == "Ticker Deep Dive":
                             # WACC breakdown
                             _wb_r = _rev_assumptions.get("wacc_breakdown", {})
                             if _wb_r and _wb_r.get("weight_debt", 0) > 0:
+                                _rfr_r = _rev_assumptions.get("risk_free_rate")
+                                _rfr_src_r = "live" if _risk_free_rate is not None else "default"
+                                _rfr_label_r = f" · Risk-free rate: {_rfr_r:.2f}% ({_rfr_src_r})" if _rfr_r else ""
                                 st.caption(
                                     f"WACC = ({_wb_r.get('weight_equity', 0):.0f}% equity × "
                                     f"{_wb_r.get('cost_of_equity', 0):.1f}% CoE) + "
                                     f"({_wb_r.get('weight_debt', 0):.0f}% debt × "
                                     f"{_wb_r.get('cost_of_debt', 0):.1f}% CoD × "
                                     f"(1 - {_wb_r.get('effective_tax_rate', 0):.0f}% tax))"
+                                    f"{_rfr_label_r}"
                                 )
 
                             recalc_rev = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
@@ -1866,6 +1880,7 @@ elif active_tab == "Ticker Deep Dive":
                                 terminal_growth_override=user_terminal_r / 100.0,
                                 analyst_estimates=_analysis.get("analyst_estimates", []),
                                 growth_stages=stages,
+                                risk_free_rate=_risk_free_rate,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -2106,7 +2121,8 @@ elif active_tab == "Ratio Comparison":
                     universe_info = {"company_name": r.get("company_name", ""), "segment": r.get("segment", "")}
 
                 analysis = analyze_ticker(ticker, fmp, universe_info,
-                                          history_years=history_years)
+                                          history_years=history_years,
+                                          risk_free_rate=_risk_free_rate)
                 metric_data = analysis.get("metrics", {}).get(selected_ratio, {})
                 comparison_data.append({
                     "Ticker": ticker,
