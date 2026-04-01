@@ -533,7 +533,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                            projection_years: int = 10,
                            analyst_estimates: list[dict] | None = None,
                            growth_stages: list[dict] | None = None,
-                           risk_free_rate: float | None = None) -> dict:
+                           risk_free_rate: float | None = None,
+                           annual_debt_paydown: float | None = None) -> dict:
     """
     Discounted Cash Flow valuation — "what has to be true" model.
 
@@ -605,6 +606,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     # --- Net debt (total debt - cash) for EV → equity bridge ---
     net_debt = 0.0  # default: assume no net debt if data unavailable
     balance_sheets = balance_sheets or []
+    auto_debt_paydown = None  # auto-estimated from historical balance sheets
     if balance_sheets:
         latest_bs = balance_sheets[0]
         total_debt = _safe_float(latest_bs.get("totalDebt") or latest_bs.get("longTermDebt"))
@@ -614,8 +616,26 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             net_debt = total_debt - cash  # positive = net debt, negative = net cash
         else:
             warnings.append("Missing debt/cash data — skipping net debt adjustment")
+
+        # Auto-estimate annual debt paydown from historical balance sheets (up to 3 years)
+        debt_values = []
+        for bs in balance_sheets[:4]:
+            d = _safe_float(bs.get("totalDebt") or bs.get("longTermDebt"))
+            if d is not None:
+                debt_values.append(d)
+        if len(debt_values) >= 2:
+            # Average YoY reduction (positive = paying down, negative = taking on more)
+            reductions = [debt_values[i] - debt_values[i + 1] for i in range(len(debt_values) - 1)]
+            avg_reduction = sum(reductions) / len(reductions)
+            if avg_reduction > 0:
+                auto_debt_paydown = avg_reduction
     else:
         warnings.append("No balance sheet data — skipping net debt adjustment")
+
+    # Resolve annual debt paydown — use user override if provided, else auto-estimate
+    resolved_debt_paydown = annual_debt_paydown if annual_debt_paydown is not None else (auto_debt_paydown or 0.0)
+    # Project net debt to end of projection period (floor at zero — can't have negative debt)
+    net_debt_at_terminal = max(net_debt - resolved_debt_paydown * projection_years, 0.0)
 
     # --- Historical FCF growth rate (CAGR) ---
     hist_fcf_growth = None
@@ -781,7 +801,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     # --- Intrinsic value ---
     sum_pv_fcfs = sum(p["present_value"] for p in projected_fcfs)
     enterprise_value = sum_pv_fcfs + terminal_pv
-    equity_value = enterprise_value - net_debt  # EV - net debt = equity value
+    # Use projected net debt at terminal (accounts for debt paydown over projection period)
+    equity_value = enterprise_value - net_debt_at_terminal
     if equity_value <= 0:
         warnings.append("Equity value negative after subtracting net debt — company may be over-leveraged")
         current_price = _safe_float(profile.get("price"))
@@ -797,6 +818,10 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                 "terminal_growth": round(terminal_growth * 100, 2),
                 "shares_outstanding": shares,
                 "beta": beta,
+                "net_debt": round(net_debt, 0),
+                "net_debt_at_terminal": round(net_debt_at_terminal, 0),
+                "annual_debt_paydown": round(resolved_debt_paydown, 0),
+                "auto_debt_paydown": round(auto_debt_paydown, 0) if auto_debt_paydown is not None else None,
                 "hist_fcf_growth": round(hist_fcf_growth * 100, 1) if hist_fcf_growth is not None else None,
                 "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
                 "analyst_num_analysts": analyst_num_analysts,
@@ -848,7 +873,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             t_val = t_fcf / (d - terminal_growth) if d > terminal_growth else 0
             t_pv = t_val / (1 + d) ** projection_years
             ev = pv_sum + t_pv
-            eq = ev - net_debt
+            eq = ev - net_debt_at_terminal
             price = max(eq, 0) / shares
             row[f"{d*100:.1f}%"] = round(price, 2)
         sensitivity.append(row)
@@ -867,6 +892,9 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             "projection_years": projection_years,
             "shares_outstanding": shares,
             "net_debt": round(net_debt, 0),
+            "net_debt_at_terminal": round(net_debt_at_terminal, 0),
+            "annual_debt_paydown": round(resolved_debt_paydown, 0),
+            "auto_debt_paydown": round(auto_debt_paydown, 0) if auto_debt_paydown is not None else None,
             "hist_fcf_growth": round(hist_fcf_growth * 100, 1) if hist_fcf_growth is not None else None,
             "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
             "analyst_num_analysts": analyst_num_analysts,
@@ -893,7 +921,9 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                                    projection_years: int = 10,
                                    analyst_estimates: list[dict] | None = None,
                                    growth_stages: list[dict] | None = None,
-                                   risk_free_rate: float | None = None) -> dict:
+                                   risk_free_rate: float | None = None,
+                                   annual_debt_paydown: float | None = None,
+                                   use_margin_reversion: bool = True) -> dict:
     """
     Revenue-based DCF — derives FCF from projected revenue × target FCF margin.
 
@@ -965,6 +995,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
 
     # --- Net debt ---
     net_debt = 0.0
+    auto_debt_paydown = None
     balance_sheets = balance_sheets or []
     if balance_sheets:
         latest_bs = balance_sheets[0]
@@ -976,6 +1007,21 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         else:
             warnings.append("Missing debt/cash data — skipping net debt adjustment")
 
+        # Auto-estimate annual debt paydown from historical balance sheets
+        debt_values = []
+        for bs in balance_sheets[:4]:
+            d = _safe_float(bs.get("totalDebt") or bs.get("longTermDebt"))
+            if d is not None:
+                debt_values.append(d)
+        if len(debt_values) >= 2:
+            reductions = [debt_values[i] - debt_values[i + 1] for i in range(len(debt_values) - 1)]
+            avg_reduction = sum(reductions) / len(reductions)
+            if avg_reduction > 0:
+                auto_debt_paydown = avg_reduction
+
+    resolved_debt_paydown = annual_debt_paydown if annual_debt_paydown is not None else (auto_debt_paydown or 0.0)
+    net_debt_at_terminal = max(net_debt - resolved_debt_paydown * projection_years, 0.0)
+
     # --- Growth rate ---
     if revenue_growth_override is not None:
         revenue_growth = revenue_growth_override
@@ -985,7 +1031,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         revenue_growth = 0.08
         warnings.append("Could not compute historical revenue growth — using 8% default")
 
-    # --- Target FCF margin ---
+    # --- Target FCF margin (terminal margin the company converges to) ---
     if target_fcf_margin_override is not None:
         target_fcf_margin = target_fcf_margin_override
     elif hist_median_fcf_margin is not None and hist_median_fcf_margin > 0:
@@ -993,6 +1039,13 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     else:
         target_fcf_margin = 0.10  # conservative 10% default
         warnings.append("No positive historical FCF margin — using 10% default target")
+
+    # Starting margin for reversion — most recent year's FCF/Revenue
+    starting_fcf_margin = hist_fcf_margins[0] if hist_fcf_margins else target_fcf_margin
+    # If starting margin is negative, begin at 0 and grow to target
+    if starting_fcf_margin < 0:
+        starting_fcf_margin = 0.0
+        warnings.append("Most recent FCF margin is negative — margin reversion starts from 0%")
 
     # --- WACC calculation (proper weighted average) ---
     if risk_free_rate is None:
@@ -1067,6 +1120,13 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     projected_fcfs = []
     rev = base_revenue
 
+    def _margin_for_year(year: int) -> float:
+        """Linearly interpolate from starting_fcf_margin → target_fcf_margin over projection_years."""
+        if not use_margin_reversion or projection_years <= 1:
+            return target_fcf_margin
+        t = year / projection_years  # 0→1 over the horizon
+        return starting_fcf_margin + t * (target_fcf_margin - starting_fcf_margin)
+
     if growth_stages:
         year_counter = 1
         for stage in growth_stages:
@@ -1076,26 +1136,30 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 if year_counter > projection_years:
                     break
                 rev = rev * (1 + stage_rate)
-                fcf = rev * target_fcf_margin
+                margin = _margin_for_year(year_counter)
+                fcf = rev * margin
                 pv = fcf / (1 + discount_rate) ** year_counter
                 projected_fcfs.append({
                     "year": year_counter,
                     "revenue": round(rev, 0),
                     "fcf": round(fcf, 0),
                     "present_value": round(pv, 0),
+                    "fcf_margin": round(margin * 100, 2),
                     "stage_rate": round(stage_rate * 100, 1),
                 })
                 year_counter += 1
     else:
         for year in range(1, projection_years + 1):
             rev = rev * (1 + revenue_growth)
-            fcf = rev * target_fcf_margin
+            margin = _margin_for_year(year)
+            fcf = rev * margin
             pv = fcf / (1 + discount_rate) ** year
             projected_fcfs.append({
                 "year": year,
                 "revenue": round(rev, 0),
                 "fcf": round(fcf, 0),
                 "present_value": round(pv, 0),
+                "fcf_margin": round(margin * 100, 2),
             })
 
     # --- Terminal value ---
@@ -1106,7 +1170,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     # --- Intrinsic value ---
     sum_pv_fcfs = sum(p["present_value"] for p in projected_fcfs)
     enterprise_value = sum_pv_fcfs + terminal_pv
-    equity_value = enterprise_value - net_debt
+    equity_value = enterprise_value - net_debt_at_terminal
     if equity_value <= 0:
         warnings.append("Equity value negative after subtracting net debt")
         current_price = _safe_float(profile.get("price"))
@@ -1117,10 +1181,16 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 "base_revenue": round(base_revenue, 0),
                 "revenue_growth": round(revenue_growth * 100, 2),
                 "target_fcf_margin": round(target_fcf_margin * 100, 2),
+                "starting_fcf_margin": round(starting_fcf_margin * 100, 2),
+                "use_margin_reversion": use_margin_reversion,
                 "discount_rate": round(discount_rate * 100, 2),
                 "terminal_growth": round(terminal_growth * 100, 2),
                 "shares_outstanding": shares,
                 "beta": beta,
+                "net_debt": round(net_debt, 0),
+                "net_debt_at_terminal": round(net_debt_at_terminal, 0),
+                "annual_debt_paydown": round(resolved_debt_paydown, 0),
+                "auto_debt_paydown": round(auto_debt_paydown, 0) if auto_debt_paydown is not None else None,
                 "hist_rev_growth": round(hist_rev_growth * 100, 1) if hist_rev_growth is not None else None,
                 "hist_median_fcf_margin": round(hist_median_fcf_margin * 100, 1) if hist_median_fcf_margin is not None else None,
                 "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
@@ -1164,13 +1234,14 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             pv_sum = 0
             for yr in range(1, projection_years + 1):
                 r = r * (1 + g)
-                f = r * target_fcf_margin
+                m = _margin_for_year(yr)
+                f = r * m
                 pv_sum += f / (1 + d) ** yr
             t_fcf = (r * target_fcf_margin) * (1 + terminal_growth)
             t_val = t_fcf / (d - terminal_growth) if d > terminal_growth else 0
             t_pv = t_val / (1 + d) ** projection_years
             ev = pv_sum + t_pv
-            eq = ev - net_debt
+            eq = ev - net_debt_at_terminal
             price = max(eq, 0) / shares
             row[f"{d*100:.1f}%"] = round(price, 2)
         sensitivity.append(row)
@@ -1184,6 +1255,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "base_revenue": round(base_revenue, 0),
             "revenue_growth": round(revenue_growth * 100, 2),
             "target_fcf_margin": round(target_fcf_margin * 100, 2),
+            "starting_fcf_margin": round(starting_fcf_margin * 100, 2),
+            "use_margin_reversion": use_margin_reversion,
             "discount_rate": round(discount_rate * 100, 2),
             "terminal_growth": round(terminal_growth * 100, 2),
             "beta": round(beta, 2),
@@ -1191,6 +1264,9 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "projection_years": projection_years,
             "shares_outstanding": shares,
             "net_debt": round(net_debt, 0),
+            "net_debt_at_terminal": round(net_debt_at_terminal, 0),
+            "annual_debt_paydown": round(resolved_debt_paydown, 0),
+            "auto_debt_paydown": round(auto_debt_paydown, 0) if auto_debt_paydown is not None else None,
             "hist_rev_growth": round(hist_rev_growth * 100, 1) if hist_rev_growth is not None else None,
             "hist_median_fcf_margin": round(hist_median_fcf_margin * 100, 1) if hist_median_fcf_margin is not None else None,
             "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
