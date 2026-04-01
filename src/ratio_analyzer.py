@@ -532,7 +532,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                            terminal_growth_override: float | None = None,
                            projection_years: int = 10,
                            analyst_estimates: list[dict] | None = None,
-                           growth_stages: list[dict] | None = None) -> dict:
+                           growth_stages: list[dict] | None = None,
+                           risk_free_rate: float | None = None) -> dict:
     """
     Discounted Cash Flow valuation — "what has to be true" model.
 
@@ -567,15 +568,28 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         return {"dcf_price": None, "warnings": ["Insufficient FCF history for DCF"],
                 "assumptions": {}, "has_data": False}
 
-    # Use average of last 2 years as base (smooths one-off spikes)
-    base_fcf = np.mean(fcf_values[:2])
+    # Use weighted median of up to 5 years as base (recent years weighted more heavily)
+    # Weights: most recent = 5, next = 4, ..., oldest = 1
+    n = len(fcf_values)
+    weights = list(range(n, 0, -1))  # e.g. [5, 4, 3, 2, 1] for 5 years
+    # Weighted median: sort by value, pick the value where cumulative weight crosses 50%
+    paired = sorted(zip(fcf_values, weights), key=lambda x: x[0])
+    total_weight = sum(weights)
+    cumulative = 0
+    base_fcf = paired[len(paired) // 2][0]  # fallback to simple median
+    for val, w in paired:
+        cumulative += w
+        if cumulative >= total_weight / 2:
+            base_fcf = val
+            break
+
     if base_fcf <= 0:
-        # Try 3-year average as fallback
-        base_fcf = np.mean(fcf_values[:3]) if len(fcf_values) >= 3 else base_fcf
+        # Fallback: try simple mean of all available years
+        base_fcf = np.mean(fcf_values)
         if base_fcf <= 0:
-            return {"dcf_price": None, "warnings": ["Negative average FCF — DCF not applicable"],
+            return {"dcf_price": None, "warnings": ["Negative weighted median FCF — DCF not applicable"],
                     "assumptions": {}, "has_data": False}
-        warnings.append("Recent FCF mixed — using 3-year average as base")
+        warnings.append("Weighted median FCF negative — using mean of all years as base")
 
     # --- Shares outstanding ---
     shares = None
@@ -648,7 +662,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         warnings.append("Could not compute historical FCF growth — using 5% default")
 
     # --- WACC calculation (proper weighted average) ---
-    risk_free_rate = 0.043  # ~10yr Treasury as of 2026
+    if risk_free_rate is None:
+        risk_free_rate = 0.043  # fallback ~10yr Treasury
     equity_risk_premium = 0.055
     beta = _safe_float(profile.get("beta")) or 1.0
     if beta < 0.3:
@@ -877,7 +892,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                                    terminal_growth_override: float | None = None,
                                    projection_years: int = 10,
                                    analyst_estimates: list[dict] | None = None,
-                                   growth_stages: list[dict] | None = None) -> dict:
+                                   growth_stages: list[dict] | None = None,
+                                   risk_free_rate: float | None = None) -> dict:
     """
     Revenue-based DCF — derives FCF from projected revenue × target FCF margin.
 
@@ -979,7 +995,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
         warnings.append("No positive historical FCF margin — using 10% default target")
 
     # --- WACC calculation (proper weighted average) ---
-    risk_free_rate = 0.043
+    if risk_free_rate is None:
+        risk_free_rate = 0.043  # fallback ~10yr Treasury
     equity_risk_premium = 0.055
     beta = _safe_float(profile.get("beta")) or 1.0
     if beta < 0.3:
@@ -1170,6 +1187,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "discount_rate": round(discount_rate * 100, 2),
             "terminal_growth": round(terminal_growth * 100, 2),
             "beta": round(beta, 2),
+            "risk_free_rate": round(risk_free_rate * 100, 2),
             "projection_years": projection_years,
             "shares_outstanding": shares,
             "net_debt": round(net_debt, 0),
@@ -1190,7 +1208,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
 
 
 def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
-                    history_years: int | None = None) -> dict:
+                    history_years: int | None = None,
+                    risk_free_rate: float | None = None) -> dict:
     """
     Pull all ratios for a ticker, compute percentile ranks against its own history.
 
@@ -1336,6 +1355,7 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         profile=profile,
         balance_sheets=balance_sheet,
         analyst_estimates=analyst_estimates,
+        risk_free_rate=risk_free_rate,
     )
 
     # Determine the most recent filing period for display context

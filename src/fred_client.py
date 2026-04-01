@@ -30,6 +30,11 @@ FRED_SERIES = {
         "label": "Eggs (Grade A Large)",
         "units": "$/dozen",
     },
+    "treasury_10y": {
+        "series_id": "DGS10",
+        "label": "10-Year Treasury Yield",
+        "units": "%",
+    },
 }
 
 # Map period strings to approximate number of months to fetch
@@ -197,6 +202,17 @@ class FREDClient:
             "change": change,
             "change_pct": change_pct,
         }
+
+    def get_risk_free_rate(self) -> float | None:
+        """
+        Get the current 10-year Treasury yield as a decimal (e.g. 0.043 for 4.3%).
+
+        Returns None if FRED is unavailable, allowing callers to fall back to a default.
+        """
+        data = self.get_series("treasury_10y", period="1mo")
+        if data:
+            return data[0]["value"] / 100.0  # FRED reports as percentage
+        return None
 
     def clear_cache(self):
         """Delete all cached FRED responses."""
