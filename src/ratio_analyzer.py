@@ -1405,6 +1405,95 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     }
 
 
+def compute_reverse_dcf(
+    base_fcf: float,
+    current_price: float,
+    shares: float,
+    net_debt: float,
+    discount_rate: float,
+    terminal_growth: float,
+    projection_years: int = 10,
+    annual_debt_paydown: float = 0.0,
+) -> dict:
+    """
+    Reverse DCF: solve for the implied flat FCF growth rate that makes the DCF
+    intrinsic value equal the current market price.
+
+    Uses bisection (60 iterations → accuracy < 0.0001%).
+
+    Returns:
+        dict with:
+          implied_growth (float | None) — solved growth rate in %
+          direction ("solved" | "below_floor" | "above_ceiling")
+          message (str | None) — human-readable edge-case note
+    """
+    if not (base_fcf and base_fcf > 0 and current_price and current_price > 0
+            and shares and shares > 0):
+        return {"implied_growth": None, "direction": "error",
+                "message": "Insufficient data for Reverse DCF"}
+
+    net_debt_at_terminal = max(net_debt - annual_debt_paydown * projection_years, 0.0)
+    # Equity value implied by current price
+    target_equity_value = current_price * shares
+    # Enterprise value implied by current price
+    target_ev = target_equity_value + net_debt_at_terminal
+
+    def _ev_at_growth(g: float) -> float:
+        fcf = base_fcf
+        total_pv = 0.0
+        for year in range(1, projection_years + 1):
+            fcf = fcf * (1 + g)
+            total_pv += fcf / (1 + discount_rate) ** year
+        terminal_fcf = fcf * (1 + terminal_growth)
+        tv = terminal_fcf / (discount_rate - terminal_growth)
+        tv_pv = tv / (1 + discount_rate) ** projection_years
+        return total_pv + tv_pv
+
+    lo, hi = -0.30, 1.00  # search from -30% to +100% annual FCF growth
+    ev_lo = _ev_at_growth(lo)
+    ev_hi = _ev_at_growth(hi)
+
+    if ev_lo > target_ev:
+        # Even at -30% annual FCF decline the company is worth more than market price →
+        # market is pricing in worse than -30% — stock looks deeply undervalued vs. FCF
+        return {
+            "implied_growth": None,
+            "direction": "below_floor",
+            "message": (
+                "Market price implies worse than −30% annual FCF decline — "
+                "stock appears deeply undervalued relative to current cash flows."
+            ),
+        }
+    if ev_hi < target_ev:
+        # Even at +100% annual FCF growth the DCF can't justify current price →
+        # market expects extraordinary growth beyond the search range
+        return {
+            "implied_growth": None,
+            "direction": "above_ceiling",
+            "message": (
+                "Market price implies more than +100% annual FCF growth — "
+                "stock is priced for extraordinary expectations."
+            ),
+        }
+
+    # Bisection — _ev_at_growth is monotonically increasing in g
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if _ev_at_growth(mid) < target_ev:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-8:
+            break
+
+    implied_g = (lo + hi) / 2.0
+    return {
+        "implied_growth": round(implied_g * 100, 2),
+        "direction": "solved",
+        "message": None,
+    }
+
+
 def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
                     history_years: int | None = None,
                     risk_free_rate: float | None = None) -> dict:
