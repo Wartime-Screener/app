@@ -34,7 +34,12 @@ from src.commodity_client import (
     COMMODITY_SYMBOLS, get_commodity_quote, get_commodity_quote_by_symbol,
     get_commodity_history, clear_cache as clear_commodity_cache
 )
-from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, compute_reverse_dcf, compute_reverse_revenue_dcf, _load_scoring_config
+from src.ratio_analyzer import (
+    analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation,
+    run_dcf_monte_carlo, compute_reverse_dcf, compute_reverse_revenue_dcf,
+    compute_earnings_dcf_valuation, compute_reverse_earnings_dcf,
+    infer_dcf_model, _load_scoring_config,
+)
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
@@ -1581,16 +1586,30 @@ elif active_tab == "Ticker Deep Dive":
 
                     assumptions = _dcf.get("assumptions", {})
 
+                    # --- Industry-aware model detection ---
+                    _profile_for_model = _analysis.get("profile", {})
+                    _segment_for_model = _analysis.get("segment", "")
+                    _preferred_model   = infer_dcf_model(_profile_for_model, _segment_for_model)
+
                     # --- DCF Mode Toggle ---
-                    dcf_mode = st.radio(
-                        "Model from:",
-                        options=["FCF", "Revenue"],
-                        horizontal=True,
-                        key="dcf_mode_toggle",
-                        help="**FCF**: project from historical free cash flow (default for most stocks). "
-                             "**Revenue**: derive FCF from projected revenue × target margin (better for "
-                             "high-growth, negative-FCF, or SaaS-transition companies).",
-                    )
+                    if _preferred_model == "Earnings":
+                        st.info(
+                            "⚡ **Utility / Regulated Business detected** — showing the "
+                            "**Earnings Power Model** (EPS growth + terminal P/E + dividends). "
+                            "FCF and Revenue models are not meaningful for capital-intensive "
+                            "regulated utilities."
+                        )
+                        dcf_mode = "Earnings"
+                    else:
+                        dcf_mode = st.radio(
+                            "Model from:",
+                            options=["FCF", "Revenue"],
+                            horizontal=True,
+                            key="dcf_mode_toggle",
+                            help="**FCF**: project from historical free cash flow (default for most stocks). "
+                                 "**Revenue**: derive FCF from projected revenue × target margin (better for "
+                                 "high-growth, negative-FCF, or SaaS-transition companies).",
+                        )
 
                     st.markdown("#### Assumptions")
 
@@ -1963,6 +1982,150 @@ elif active_tab == "Ticker Deep Dive":
                             p2_rate, p2_years = rp2_rate, rp2_years
                             p3_rate, p3_years = rp3_rate, rp3_years
 
+                    elif dcf_mode == "Earnings":
+                        # ===== EARNINGS POWER DCF (utilities) =====
+                        _earn_init = compute_earnings_dcf_valuation(
+                            income_statements=_analysis.get("income_statements", []),
+                            profile=_analysis.get("profile", {}),
+                            balance_sheets=_analysis.get("balance_sheets", []),
+                            analyst_estimates=_analysis.get("analyst_estimates", []),
+                            risk_free_rate=_risk_free_rate,
+                        )
+                        _earn_a = _earn_init.get("assumptions", {})
+                        _earn_default_growth   = max(-5.0, min(15.0, float(_earn_a.get("growth_rate", 5.0))))
+                        _earn_default_discount = max(3.0,  min(20.0, float(_earn_a.get("discount_rate", 7.0))))
+                        _earn_default_pe       = float(_earn_a.get("terminal_pe", 16.0))
+                        _earn_hist_eps         = _earn_a.get("hist_eps_growth")
+                        _earn_analyst_eps      = _earn_a.get("analyst_eps_growth")
+                        _earn_payout           = _earn_a.get("payout_ratio", 50.0)
+
+                        for w in _earn_init.get("warnings", []):
+                            st.warning(w)
+
+                        st.markdown("#### Assumptions")
+                        _earn_refs = []
+                        if _earn_hist_eps is not None:
+                            _earn_refs.append(f"Hist EPS CAGR: {_earn_hist_eps:+.1f}%")
+                        if _earn_analyst_eps is not None:
+                            _earn_refs.append(f"Analyst EPS Growth: {_earn_analyst_eps:+.1f}%")
+                        if _earn_refs:
+                            st.caption(f"Reference: {' | '.join(_earn_refs)}")
+
+                        with st.form(key="dcf_earn_form"):
+                            _earn_ms = st.checkbox("Use multi-stage growth (recommended)", value=True,
+                                                   key="dcf_earn_multistage",
+                                                   help="Model EPS growth deceleration over time.")
+                            if _earn_ms:
+                                st.markdown("**EPS Growth Phases** *(total must equal 10 years)*")
+                                _ep_cols = st.columns(6)
+                                with _ep_cols[0]:
+                                    ep1_rate = st.number_input("Phase 1 Rate (%)", min_value=-10.0, max_value=20.0,
+                                                               value=float(_earn_default_growth), step=0.25,
+                                                               format="%.2f", key="dcf_ep1_rate")
+                                with _ep_cols[1]:
+                                    ep1_years = st.number_input("Years", min_value=1, max_value=9,
+                                                                value=3, step=1, key="dcf_ep1_years")
+                                with _ep_cols[2]:
+                                    ep2_rate = st.number_input("Phase 2 Rate (%)", min_value=-10.0, max_value=20.0,
+                                                               value=max(float(_earn_default_growth) * 0.7, 2.0),
+                                                               step=0.25, format="%.2f", key="dcf_ep2_rate")
+                                with _ep_cols[3]:
+                                    ep2_years = st.number_input("Years", min_value=1, max_value=9,
+                                                                value=4, step=1, key="dcf_ep2_years")
+                                with _ep_cols[4]:
+                                    ep3_rate = st.number_input("Phase 3 Rate (%)", min_value=-10.0, max_value=20.0,
+                                                               value=max(float(_earn_default_growth) * 0.5, 2.0),
+                                                               step=0.25, format="%.2f", key="dcf_ep3_rate")
+                                with _ep_cols[5]:
+                                    ep3_years = st.number_input("Years", min_value=0, max_value=9,
+                                                                value=3, step=1, key="dcf_ep3_years")
+                                total_earn_years = ep1_years + ep2_years + ep3_years
+                                if total_earn_years != 10:
+                                    st.warning(f"⚠️ Phases total {total_earn_years} years — should equal 10")
+                                earn_growth = ep1_rate
+                            else:
+                                earn_growth = st.number_input("EPS Growth Rate (%) — flat for all 10 years",
+                                                              min_value=-10.0, max_value=20.0,
+                                                              value=float(_earn_default_growth),
+                                                              step=0.25, format="%.2f", key="dcf_earn_growth")
+                                ep1_rate = ep2_rate = ep3_rate = earn_growth
+                                ep1_years = ep2_years = ep3_years = 0
+
+                            _earn_inp_cols = st.columns(3)
+                            with _earn_inp_cols[0]:
+                                earn_discount = st.number_input(
+                                    f"Discount Rate / WACC (%)  ·  Beta: {_earn_a.get('beta', 1.0):.2f}",
+                                    min_value=3.0, max_value=20.0,
+                                    value=_earn_default_discount,
+                                    step=0.25, format="%.2f", key="dcf_earn_discount",
+                                )
+                            with _earn_inp_cols[1]:
+                                earn_terminal_pe = st.number_input(
+                                    "Terminal P/E Multiple (x)",
+                                    min_value=8.0, max_value=30.0,
+                                    value=_earn_default_pe,
+                                    step=0.5, format="%.1f", key="dcf_earn_terminal_pe",
+                                    help="P/E multiple applied to year-10 EPS to compute terminal value. "
+                                         "Regulated utilities typically trade at 14–20x.",
+                                )
+                            with _earn_inp_cols[2]:
+                                st.metric("Payout Ratio", f"{_earn_payout:.1f}%",
+                                          help="Dividends as % of EPS — auto-calculated from last dividend and EPS. "
+                                               "Used to discount annual dividend income back to present.")
+
+                            _earn_wb = _earn_a.get("wacc_breakdown", {})
+                            if _earn_wb and _earn_wb.get("weight_debt", 0) > 0:
+                                _rfr_e = _earn_a.get("risk_free_rate")
+                                _rfr_src_e = "live" if _risk_free_rate is not None else "default"
+                                _rfr_lbl_e = f" · Risk-free rate: {_rfr_e:.2f}% ({_rfr_src_e})" if _rfr_e else ""
+                                st.caption(
+                                    f"WACC = ({_earn_wb.get('weight_equity', 0):.0f}% equity × "
+                                    f"{_earn_wb.get('cost_of_equity', 0):.1f}% CoE) + "
+                                    f"({_earn_wb.get('weight_debt', 0):.0f}% debt × "
+                                    f"{_earn_wb.get('cost_of_debt', 0):.1f}% CoD × "
+                                    f"(1 - {_earn_wb.get('effective_tax_rate', 0):.0f}% tax))"
+                                    f"{_rfr_lbl_e}"
+                                )
+
+                            recalc_earn = st.form_submit_button("🔄 Recalculate Earnings DCF",
+                                                                use_container_width=True)
+
+                        dcf_display = _earn_init
+                        if recalc_earn:
+                            _earn_stages = None
+                            if _earn_ms:
+                                _earn_stages = []
+                                if ep1_years > 0:
+                                    _earn_stages.append({"rate": ep1_rate / 100.0, "years": ep1_years})
+                                if ep2_years > 0:
+                                    _earn_stages.append({"rate": ep2_rate / 100.0, "years": ep2_years})
+                                if ep3_years > 0:
+                                    _earn_stages.append({"rate": ep3_rate / 100.0, "years": ep3_years})
+                            dcf_display = compute_earnings_dcf_valuation(
+                                income_statements=_analysis.get("income_statements", []),
+                                profile=_analysis.get("profile", {}),
+                                balance_sheets=_analysis.get("balance_sheets", []),
+                                analyst_estimates=_analysis.get("analyst_estimates", []),
+                                earnings_growth_override=earn_growth / 100.0 if not _earn_ms else None,
+                                discount_rate_override=earn_discount / 100.0,
+                                terminal_pe_override=earn_terminal_pe,
+                                growth_stages=_earn_stages,
+                                risk_free_rate=_risk_free_rate,
+                            )
+                            for w in dcf_display.get("warnings", []):
+                                st.warning(w)
+
+                        # Alias to shared variable names used in display sections below
+                        user_growth    = earn_growth
+                        user_discount  = earn_discount
+                        user_terminal  = earn_terminal_pe   # repurposed for terminal P/E display
+                        use_multistage = _earn_ms
+                        recalc         = recalc_earn
+                        if _earn_ms:
+                            p1_rate, p1_years = ep1_rate, ep1_years
+                            p2_rate, p2_years = ep2_rate, ep2_years
+                            p3_rate, p3_years = ep3_rate, ep3_years
+
                     # --- Summary metrics ---
                     st.markdown("#### Valuation")
                     # Use validated price (corrected by price validator) instead of stale FMP price
@@ -2024,6 +2187,17 @@ elif active_tab == "Ticker Deep Dive":
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
                             f"{_paydown_desc}"
                         )
+                    elif dcf_mode == "Earnings":
+                        _earn_base_eps = assumptions_updated.get("base_eps", 0)
+                        _earn_payout_d = assumptions_updated.get("payout_ratio", 0)
+                        st.caption(
+                            f"⚡ Earnings Power  ·  Base EPS: ${_earn_base_eps:.2f}  ·  "
+                            f"Payout: {_earn_payout_d:.1f}%  ·  "
+                            f"{growth_desc}  ·  "
+                            f"WACC: {user_discount:.2f}%  ·  "
+                            f"Terminal P/E: {assumptions_updated.get('terminal_pe', 16.0):.1f}x  ·  "
+                            f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
+                        )
                     else:
                         base_fcf = assumptions_updated.get("base_fcf", 0)
                         _fcf_paydown = assumptions_updated.get("annual_debt_paydown", 0)
@@ -2041,9 +2215,14 @@ elif active_tab == "Ticker Deep Dive":
                             f"{_fcf_paydown_desc}"
                         )
 
-                    # --- Sensitivity table (the real value) ---
-                    st.markdown("#### Sensitivity Table — Implied Price per Share")
-                    st.caption("Rows = FCF growth rate, Columns = discount rate (WACC). Find what has to be true for the stock to be worth its current price.")
+                    # --- Sensitivity table ---
+                    if dcf_mode == "Earnings":
+                        st.markdown("#### Sensitivity Table — Implied Price per Share")
+                        st.caption("Rows = EPS growth rate, Columns = terminal P/E multiple. "
+                                   "Find what assumptions justify the current price.")
+                    else:
+                        st.markdown("#### Sensitivity Table — Implied Price per Share")
+                        st.caption("Rows = FCF growth rate, Columns = discount rate (WACC). Find what has to be true for the stock to be worth its current price.")
 
                     sensitivity = dcf_display.get("sensitivity", [])
                     if sensitivity:
@@ -2334,6 +2513,91 @@ elif active_tab == "Ticker Deep Dive":
                                 unsafe_allow_html=True,
                             )
 
+                    # --- Reverse Earnings DCF (Earnings mode only) ---
+                    elif dcf_mode == "Earnings":
+                        _re_assumptions = dcf_display.get("assumptions", {})
+                        _re_base_eps    = _re_assumptions.get("base_eps")
+                        _re_payout      = (_re_assumptions.get("payout_ratio") or 50.0) / 100.0
+                        _re_hist_eps    = _re_assumptions.get("hist_eps_growth")
+                        _re_analyst_eps = _re_assumptions.get("analyst_eps_growth")
+
+                        if (_re_base_eps and _re_base_eps > 0
+                                and _dcf_current_price and _dcf_current_price > 0):
+                            st.markdown("#### Reverse DCF — What EPS Growth Does the Market Expect?")
+                            st.caption(
+                                "Solves for the flat annual EPS growth rate that makes the Earnings Power "
+                                "model value equal today's price, using your current WACC and terminal P/E."
+                            )
+                            _re_result = compute_reverse_earnings_dcf(
+                                base_eps=_re_base_eps,
+                                payout_ratio=_re_payout,
+                                current_price=_dcf_current_price,
+                                discount_rate=user_discount / 100.0,
+                                terminal_pe=earn_terminal_pe,
+                            )
+                            _re_direction = _re_result.get("direction")
+                            _re_implied   = _re_result.get("implied_growth")
+                            _re_msg       = _re_result.get("message")
+
+                            if _re_direction == "solved" and _re_implied is not None:
+                                if _re_implied < -2:
+                                    _re_label = "🔴 Deeply Pessimistic"; _re_color = "#f87171"
+                                    _re_interp = (f"Market prices in **{_re_implied:.1f}% annual EPS decline**. "
+                                                  "Very low bar — any stabilization could re-rate the stock.")
+                                elif _re_implied < 3:
+                                    _re_label = "🟡 Low Expectations"; _re_color = "#fbbf24"
+                                    _re_interp = (f"Market expects **{_re_implied:.1f}% EPS growth** — "
+                                                  "near flat. Easy bar for a regulated utility to clear.")
+                                elif _re_implied < 8:
+                                    _re_label = "🟢 Reasonable / Modest"; _re_color = "#4ade80"
+                                    _re_interp = (f"Market prices in **{_re_implied:.1f}% annual EPS growth** — "
+                                                  "consistent with typical regulated utility guidance of 5–7%.")
+                                elif _re_implied < 12:
+                                    _re_label = "🟡 Elevated Expectations"; _re_color = "#fbbf24"
+                                    _re_interp = (f"Market expects **{_re_implied:.1f}% EPS growth** — "
+                                                  "above-average for a utility. Requires strong execution.")
+                                else:
+                                    _re_label = "🔴 Aggressive"; _re_color = "#f87171"
+                                    _re_interp = (f"Market bakes in **{_re_implied:.1f}% EPS growth** — "
+                                                  "unusually high for a regulated utility.")
+
+                                _re_cols = st.columns(3)
+                                with _re_cols[0]:
+                                    st.metric("Market-Implied EPS Growth", f"{_re_implied:+.1f}%/yr",
+                                              help="Flat annual EPS growth rate that makes Earnings DCF = current price.")
+                                with _re_cols[1]:
+                                    if _re_hist_eps is not None:
+                                        st.metric("Historical EPS CAGR", f"{_re_hist_eps:+.1f}%/yr",
+                                                  delta=f"{_re_implied - _re_hist_eps:+.1f}% vs implied",
+                                                  delta_color="inverse")
+                                    else:
+                                        st.metric("Historical EPS CAGR", "N/A")
+                                with _re_cols[2]:
+                                    if _re_analyst_eps is not None:
+                                        st.metric("Analyst EPS Growth", f"{_re_analyst_eps:+.1f}%/yr",
+                                                  delta=f"{_re_implied - _re_analyst_eps:+.1f}% vs implied",
+                                                  delta_color="inverse")
+                                    else:
+                                        st.metric("Analyst EPS Growth", "N/A")
+
+                                st.markdown(
+                                    f"<div style='padding:10px 14px; border-left: 3px solid {_re_color}; "
+                                    f"background: rgba(255,255,255,0.04); border-radius:4px; margin-top:8px'>"
+                                    f"<strong style='color:{_re_color}'>{_re_label}</strong><br>"
+                                    f"<span style='font-size:0.9em'>{_re_interp}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            elif _re_direction in ("below_floor", "above_ceiling"):
+                                _re_color = "#4ade80" if _re_direction == "below_floor" else "#f87171"
+                                st.markdown(
+                                    f"<div style='padding:10px 14px; border-left: 3px solid {_re_color}; "
+                                    f"background: rgba(255,255,255,0.04); border-radius:4px'>"
+                                    f"<span style='font-size:0.9em'>{_re_msg}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+
                     # --- Monte Carlo simulation ---
                     _mc_assumptions = dcf_display.get("assumptions", {})
                     _mc_base_fcf = _mc_assumptions.get("base_fcf")
@@ -2358,7 +2622,7 @@ elif active_tab == "Ticker Deep Dive":
                         else:
                             _mc_growth = user_growth  # single-stage: exactly what the user set
                     else:
-                        _mc_growth = None  # Revenue mode — no base_fcf, MC skipped below
+                        _mc_growth = None  # Revenue / Earnings mode — MC uses FCF base, skip
 
                     if all(v is not None for v in [_mc_base_fcf, _mc_growth, _mc_discount, _mc_terminal, _mc_shares]) and _mc_shares > 0 and _mc_base_fcf > 0:
                         st.markdown("#### Monte Carlo Simulation")
@@ -2446,37 +2710,59 @@ elif active_tab == "Ticker Deep Dive":
                             )
                             st.plotly_chart(_fig_mc, use_container_width=True)
 
-                    # --- Projected FCF chart ---
-                    projected = dcf_display.get("projected_fcfs", [])
-                    if projected:
-                        st.markdown("#### Projected Free Cash Flows")
-                        fig_fcf = go.Figure()
-                        years = [p["year"] for p in projected]
-                        fcfs = [p["fcf"] / 1e9 for p in projected]  # in billions
-                        pvs = [p["present_value"] / 1e9 for p in projected]
-
-                        fig_fcf.add_trace(go.Bar(
-                            x=years, y=fcfs,
-                            name="Projected FCF",
-                            marker_color="rgba(100, 149, 237, 0.7)",
-                            text=[f"${f:.2f}B" for f in fcfs],
-                            textposition="outside",
-                        ))
-                        fig_fcf.add_trace(go.Bar(
-                            x=years, y=pvs,
-                            name="Present Value",
-                            marker_color="rgba(100, 149, 237, 0.3)",
-                            text=[f"${p:.2f}B" for p in pvs],
-                            textposition="outside",
-                        ))
-                        fig_fcf.update_layout(
-                            xaxis_title="Year",
-                            yaxis_title="$ Billions",
-                            barmode="group",
-                            height=500,
-                            template="plotly_dark",
-                        )
-                        st.plotly_chart(fig_fcf, use_container_width=True)
+                    # --- Projected chart ---
+                    if dcf_mode == "Earnings":
+                        _earn_projected = dcf_display.get("projected_earnings", [])
+                        if _earn_projected:
+                            st.markdown("#### Projected EPS & Dividends")
+                            _earn_fig = go.Figure()
+                            _ep_years = [p["year"] for p in _earn_projected]
+                            _ep_eps   = [p["eps"] for p in _earn_projected]
+                            _ep_divs  = [p["dividend"] for p in _earn_projected]
+                            _ep_pvs   = [p["present_value"] for p in _earn_projected]
+                            _earn_fig.add_trace(go.Bar(
+                                x=_ep_years, y=_ep_eps, name="Projected EPS",
+                                marker_color="rgba(100, 149, 237, 0.7)",
+                                text=[f"${e:.2f}" for e in _ep_eps], textposition="outside",
+                            ))
+                            _earn_fig.add_trace(go.Bar(
+                                x=_ep_years, y=_ep_divs, name="Dividend (EPS × Payout)",
+                                marker_color="rgba(74, 222, 128, 0.6)",
+                                text=[f"${d:.2f}" for d in _ep_divs], textposition="outside",
+                            ))
+                            _earn_fig.add_trace(go.Bar(
+                                x=_ep_years, y=_ep_pvs, name="PV of Dividend",
+                                marker_color="rgba(100, 149, 237, 0.25)",
+                                text=[f"${p:.2f}" for p in _ep_pvs], textposition="outside",
+                            ))
+                            _earn_fig.update_layout(
+                                xaxis_title="Year", yaxis_title="$ per Share",
+                                barmode="group", height=500, template="plotly_dark",
+                            )
+                            st.plotly_chart(_earn_fig, use_container_width=True)
+                    else:
+                        projected = dcf_display.get("projected_fcfs", [])
+                        if projected:
+                            st.markdown("#### Projected Free Cash Flows")
+                            fig_fcf = go.Figure()
+                            years = [p["year"] for p in projected]
+                            fcfs = [p["fcf"] / 1e9 for p in projected]
+                            pvs = [p["present_value"] / 1e9 for p in projected]
+                            fig_fcf.add_trace(go.Bar(
+                                x=years, y=fcfs, name="Projected FCF",
+                                marker_color="rgba(100, 149, 237, 0.7)",
+                                text=[f"${f:.2f}B" for f in fcfs], textposition="outside",
+                            ))
+                            fig_fcf.add_trace(go.Bar(
+                                x=years, y=pvs, name="Present Value",
+                                marker_color="rgba(100, 149, 237, 0.3)",
+                                text=[f"${p:.2f}B" for p in pvs], textposition="outside",
+                            ))
+                            fig_fcf.update_layout(
+                                xaxis_title="Year", yaxis_title="$ Billions",
+                                barmode="group", height=500, template="plotly_dark",
+                            )
+                            st.plotly_chart(fig_fcf, use_container_width=True)
 
             _dcf_fragment()
 

@@ -1587,6 +1587,362 @@ def compute_reverse_revenue_dcf(
     }
 
 
+# ---------------------------------------------------------------------------
+# Industry → preferred DCF model detection
+# ---------------------------------------------------------------------------
+
+_UTILITY_KEYWORDS = {
+    "utilities", "utility", "electric", "gas distribution", "water utility",
+    "natural gas", "power generation", "regulated",
+}
+
+def infer_dcf_model(profile: dict, segment: str = "") -> str:
+    """
+    Return the preferred DCF model type for a ticker based on its sector/segment.
+
+    Returns one of: "Earnings", "FCF", "Revenue"
+    """
+    sector   = (profile.get("sector")   or "").lower()
+    industry = (profile.get("industry") or "").lower()
+    seg      = (segment or "").lower()
+
+    combined = f"{sector} {industry} {seg}"
+    if any(k in combined for k in _UTILITY_KEYWORDS):
+        return "Earnings"
+    return "FCF"
+
+
+# ---------------------------------------------------------------------------
+# Earnings Power DCF  (utilities and regulated businesses)
+# ---------------------------------------------------------------------------
+
+def compute_earnings_dcf_valuation(
+    income_statements: list[dict],
+    profile: dict,
+    balance_sheets: list[dict] | None = None,
+    analyst_estimates: list[dict] | None = None,
+    earnings_growth_override: float | None = None,
+    discount_rate_override: float | None = None,
+    terminal_pe_override: float | None = None,
+    projection_years: int = 10,
+    risk_free_rate: float | None = None,
+    growth_stages: list[dict] | None = None,
+) -> dict:
+    """
+    Earnings Power DCF — projects diluted EPS, discounts annual dividends
+    (EPS × payout ratio) back to present, then adds a terminal value based
+    on a P/E multiple applied to year-N EPS.
+
+    Intrinsic Value = Σ [EPS_t × payout / (1+r)^t]  +  [EPS_N × terminal_PE / (1+r)^N]
+
+    Appropriate for regulated utilities and similar businesses where:
+    - FCF is distorted by growth capex
+    - Earnings are stable and dividend-oriented
+    - The market prices on P/E rather than EV/FCF multiples
+    """
+    warnings_out: list[str] = []
+
+    # ---- EPS history --------------------------------------------------------
+    eps_values: list[float] = []
+    for stmt in income_statements[:5]:
+        eps = _safe_float(stmt.get("epsdiluted") or stmt.get("eps"))
+        if eps is not None and eps > 0:
+            eps_values.append(eps)
+
+    if len(eps_values) < 2:
+        return {"dcf_price": None,
+                "warnings": ["Insufficient positive EPS history for Earnings DCF"],
+                "assumptions": {}, "has_data": False}
+
+    # Weighted median EPS (most-recent year weighted highest)
+    n = len(eps_values)
+    weights = list(range(n, 0, -1))
+    paired = sorted(zip(eps_values, weights), key=lambda x: x[0])
+    total_w = sum(weights)
+    cum = 0
+    base_eps = paired[len(paired) // 2][0]
+    for val, w in paired:
+        cum += w
+        if cum >= total_w / 2:
+            base_eps = val
+            break
+
+    if base_eps <= 0:
+        return {"dcf_price": None,
+                "warnings": ["Weighted median EPS is zero or negative"],
+                "assumptions": {}, "has_data": False}
+
+    # ---- Shares outstanding -------------------------------------------------
+    shares = None
+    if income_statements:
+        shares = _safe_float(
+            income_statements[0].get("weightedAverageShsOutDil")
+            or income_statements[0].get("weightedAverageShsOut")
+        )
+    if not shares or shares <= 0:
+        return {"dcf_price": None, "warnings": ["No shares outstanding data"],
+                "assumptions": {}, "has_data": False}
+
+    # ---- Payout ratio -------------------------------------------------------
+    payout_ratio = 0.50   # sensible default for regulated utilities
+    last_div = _safe_float(profile.get("lastDiv"))
+    if last_div and last_div > 0 and base_eps > 0:
+        payout_ratio = min(0.95, max(0.0, last_div / base_eps))
+    else:
+        # Try income statement dividends-per-share
+        dps = _safe_float(
+            income_statements[0].get("dividendPerShare")
+            if income_statements else None
+        )
+        if dps and dps > 0 and base_eps > 0:
+            payout_ratio = min(0.95, max(0.0, dps / base_eps))
+
+    # ---- Historical EPS CAGR ------------------------------------------------
+    hist_eps_growth = None
+    pos_eps = [e for e in eps_values if e > 0]
+    if len(pos_eps) >= 3:
+        oldest, newest = pos_eps[-1], pos_eps[0]
+        span = len(pos_eps) - 1
+        if oldest > 0 and newest > 0:
+            hist_eps_growth = (newest / oldest) ** (1 / span) - 1
+
+    # ---- Analyst EPS growth (from forward estimates) ------------------------
+    analyst_eps_growth = None
+    analyst_num = None
+    if analyst_estimates:
+        sorted_est = sorted(analyst_estimates, key=lambda x: x.get("date", ""))
+        eps_ests = [
+            (e["date"], e.get("epsAvg") or e.get("epsDilutedAvg"))
+            for e in sorted_est
+            if (e.get("epsAvg") or e.get("epsDilutedAvg"))
+        ]
+        eps_ests = [(d, v) for d, v in eps_ests if v and v > 0]
+        if len(eps_ests) >= 2:
+            first_e, last_e = eps_ests[0][1], eps_ests[-1][1]
+            span_e = len(eps_ests) - 1
+            if first_e > 0 and last_e > 0:
+                analyst_eps_growth = (last_e / first_e) ** (1 / span_e) - 1
+                analyst_num = max(
+                    (e.get("numAnalystsEps", 0) for e in sorted_est), default=None
+                )
+
+    # ---- WACC (same logic as FCF DCF) ---------------------------------------
+    if risk_free_rate is None:
+        risk_free_rate = 0.043
+    equity_risk_premium = 0.055
+    beta = _safe_float(profile.get("beta")) or 1.0
+    if beta < 0.2:
+        beta = 0.4          # utility-appropriate minimum
+        warnings_out.append("Beta unusually low — floored at 0.4 for utility")
+    elif beta > 3.0:
+        warnings_out.append(f"Beta very high ({beta:.2f}) — cost of equity will be elevated")
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+
+    market_cap = _safe_float(profile.get("mktCap") or profile.get("marketCap")) or 0
+    balance_sheets = balance_sheets or []
+    total_debt_wacc, cost_of_debt, effective_tax_rate = 0.0, 0.05, 0.25
+    wacc_breakdown: dict = {}
+
+    if balance_sheets and income_statements and market_cap > 0:
+        bs, inc = balance_sheets[0], income_statements[0]
+        total_debt_wacc = _safe_float(bs.get("totalDebt") or bs.get("longTermDebt")) or 0
+        interest_exp = abs(_safe_float(inc.get("interestExpense")) or 0)
+        pretax = _safe_float(inc.get("incomeBeforeTax")) or 0
+        tax = _safe_float(inc.get("incomeTaxExpense")) or 0
+        if total_debt_wacc > 0 and interest_exp > 0:
+            cost_of_debt = max(0.02, min(0.20, interest_exp / total_debt_wacc))
+        if pretax > 0 and tax > 0:
+            effective_tax_rate = min(0.40, max(0.0, tax / pretax))
+
+    total_capital = market_cap + total_debt_wacc
+    if total_capital > 0 and total_debt_wacc > 0:
+        w_eq = market_cap / total_capital
+        w_de = total_debt_wacc / total_capital
+        default_wacc = w_eq * cost_of_equity + w_de * cost_of_debt * (1 - effective_tax_rate)
+        wacc_breakdown = {
+            "cost_of_equity": round(cost_of_equity * 100, 2),
+            "cost_of_debt": round(cost_of_debt * 100, 2),
+            "effective_tax_rate": round(effective_tax_rate * 100, 1),
+            "weight_equity": round(w_eq * 100, 1),
+            "weight_debt": round(w_de * 100, 1),
+        }
+    else:
+        default_wacc = cost_of_equity
+        wacc_breakdown = {
+            "cost_of_equity": round(cost_of_equity * 100, 2),
+            "cost_of_debt": 0, "effective_tax_rate": round(effective_tax_rate * 100, 1),
+            "weight_equity": 100.0, "weight_debt": 0.0,
+        }
+
+    discount_rate = discount_rate_override if discount_rate_override is not None else default_wacc
+
+    # ---- Growth rate --------------------------------------------------------
+    if earnings_growth_override is not None:
+        growth_rate = earnings_growth_override
+    elif hist_eps_growth is not None:
+        growth_rate = max(-0.05, min(0.15, hist_eps_growth))
+        if hist_eps_growth > 0.15:
+            warnings_out.append(f"Historical EPS CAGR ({hist_eps_growth*100:.1f}%) capped at 15%")
+    else:
+        growth_rate = 0.05
+        warnings_out.append("Could not compute historical EPS growth — using 5% default")
+
+    # ---- Terminal P/E -------------------------------------------------------
+    default_terminal_pe = 16.0   # typical regulated utility
+    terminal_pe = terminal_pe_override if terminal_pe_override is not None else default_terminal_pe
+
+    # ---- Project EPS (multi-stage or flat) ----------------------------------
+    projected: list[dict] = []
+    eps = base_eps
+    if growth_stages:
+        yr = 1
+        for stage in growth_stages:
+            r, yrs = stage["rate"], stage["years"]
+            for _ in range(yrs):
+                if yr > projection_years:
+                    break
+                eps = eps * (1 + r)
+                div = eps * payout_ratio
+                projected.append({
+                    "year": yr, "eps": round(eps, 4),
+                    "dividend": round(div, 4),
+                    "present_value": round(div / (1 + discount_rate) ** yr, 4),
+                    "stage_rate": round(r * 100, 1),
+                })
+                yr += 1
+    else:
+        for yr in range(1, projection_years + 1):
+            eps = eps * (1 + growth_rate)
+            div = eps * payout_ratio
+            projected.append({
+                "year": yr, "eps": round(eps, 4),
+                "dividend": round(div, 4),
+                "present_value": round(div / (1 + discount_rate) ** yr, 4),
+            })
+
+    # ---- Terminal value (P/E on terminal EPS) --------------------------------
+    terminal_eps = projected[-1]["eps"]
+    terminal_value_ps = terminal_eps * terminal_pe          # per share
+    terminal_pv = terminal_value_ps / (1 + discount_rate) ** projection_years
+
+    # ---- Intrinsic value -----------------------------------------------------
+    sum_pv_divs = sum(p["present_value"] for p in projected)
+    intrinsic_value = sum_pv_divs + terminal_pv
+    terminal_pct = (terminal_pv / intrinsic_value * 100) if intrinsic_value > 0 else 0
+
+    current_price = _safe_float(profile.get("price")) or 0
+    upside_pct = round((intrinsic_value / current_price - 1) * 100, 1) if current_price > 0 else None
+
+    # ---- Sensitivity table (EPS growth % vs terminal P/E) -------------------
+    growth_steps = [-0.02, 0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12]
+    pe_steps     = [12, 14, 16, 18, 20, 22]
+    sensitivity: list[dict] = []
+    for g in growth_steps:
+        row: dict = {"growth_rate": round(g * 100, 1)}
+        for pe in pe_steps:
+            _eps2 = base_eps
+            _pv2  = 0.0
+            for yr2 in range(1, projection_years + 1):
+                _eps2 = _eps2 * (1 + g)
+                _pv2 += (_eps2 * payout_ratio) / (1 + discount_rate) ** yr2
+            _tv2   = (_eps2 * pe) / (1 + discount_rate) ** projection_years
+            _price2 = round(_pv2 + _tv2, 2)
+            row[f"{pe}x"] = _price2 if _price2 > 0 else "N/A"
+        sensitivity.append(row)
+
+    return {
+        "dcf_price": round(intrinsic_value, 2),
+        "upside_pct": upside_pct,
+        "current_price": current_price,
+        "terminal_pct": round(terminal_pct, 1),
+        "projected_earnings": projected,
+        "terminal_eps": round(terminal_eps, 4),
+        "terminal_pe": terminal_pe,
+        "terminal_value_per_share": round(terminal_value_ps, 2),
+        "terminal_pv": round(terminal_pv, 2),
+        "sensitivity": sensitivity,
+        "sensitivity_pe_steps": [f"{pe}x" for pe in pe_steps],
+        "warnings": warnings_out,
+        "has_data": True,
+        "assumptions": {
+            "base_eps": round(base_eps, 4),
+            "growth_rate": round(growth_rate * 100, 2),
+            "discount_rate": round(discount_rate * 100, 2),
+            "terminal_pe": terminal_pe,
+            "payout_ratio": round(payout_ratio * 100, 1),
+            "shares_outstanding": shares,
+            "beta": beta,
+            "wacc_breakdown": wacc_breakdown,
+            "risk_free_rate": round(risk_free_rate * 100, 3) if risk_free_rate else None,
+            "hist_eps_growth": round(hist_eps_growth * 100, 2) if hist_eps_growth is not None else None,
+            "analyst_eps_growth": round(analyst_eps_growth * 100, 2) if analyst_eps_growth is not None else None,
+            "analyst_num_analysts": analyst_num,
+        },
+    }
+
+
+def compute_reverse_earnings_dcf(
+    base_eps: float,
+    payout_ratio: float,
+    current_price: float,
+    discount_rate: float,
+    terminal_pe: float,
+    projection_years: int = 10,
+) -> dict:
+    """
+    Reverse Earnings DCF: solve for the implied flat EPS growth rate that
+    makes the Earnings Power model value equal the current stock price.
+    Uses bisection (60 iterations).
+    """
+    if not (base_eps > 0 and current_price > 0 and 0 <= payout_ratio <= 1):
+        return {"implied_growth": None, "direction": "error",
+                "message": "Insufficient data for Reverse Earnings DCF"}
+
+    def _price_at_growth(g: float) -> float:
+        eps = base_eps
+        pv_divs = 0.0
+        for yr in range(1, projection_years + 1):
+            eps = eps * (1 + g)
+            pv_divs += (eps * payout_ratio) / (1 + discount_rate) ** yr
+        terminal_pv = (eps * terminal_pe) / (1 + discount_rate) ** projection_years
+        return pv_divs + terminal_pv
+
+    lo, hi = -0.20, 0.50
+    p_lo, p_hi = _price_at_growth(lo), _price_at_growth(hi)
+
+    if p_lo > current_price:
+        return {
+            "implied_growth": None, "direction": "below_floor",
+            "message": (
+                "Market price implies worse than −20% annual EPS decline — "
+                "stock appears deeply undervalued vs. current earnings."
+            ),
+        }
+    if p_hi < current_price:
+        return {
+            "implied_growth": None, "direction": "above_ceiling",
+            "message": (
+                "Market price implies more than +50% annual EPS growth — "
+                "priced for extraordinary earnings expansion."
+            ),
+        }
+
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if _price_at_growth(mid) < current_price:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-8:
+            break
+
+    return {
+        "implied_growth": round((lo + hi) / 2.0 * 100, 2),
+        "direction": "solved",
+        "message": None,
+    }
+
+
 def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
                     history_years: int | None = None,
                     risk_free_rate: float | None = None) -> dict:
