@@ -34,7 +34,7 @@ from src.commodity_client import (
     COMMODITY_SYMBOLS, get_commodity_quote, get_commodity_quote_by_symbol,
     get_commodity_history, clear_cache as clear_commodity_cache
 )
-from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, _load_scoring_config
+from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, compute_reverse_dcf, _load_scoring_config
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
@@ -2068,6 +2068,146 @@ elif active_tab == "Ticker Deep Dive":
                             "🟡 Yellow = within ±30% of current (fairly valued)  ·  "
                             "🔴 Red = implied price < 90% of current (overvalued)"
                         )
+
+                    # --- Reverse DCF ---
+                    _rev_assumptions_rd = dcf_display.get("assumptions", {})
+                    _rd_base_fcf    = _rev_assumptions_rd.get("base_fcf")
+                    _rd_shares      = _rev_assumptions_rd.get("shares_outstanding")
+                    _rd_net_debt    = _rev_assumptions_rd.get("net_debt_at_terminal",
+                                        _rev_assumptions_rd.get("net_debt", 0))
+                    _rd_paydown     = _rev_assumptions_rd.get("annual_debt_paydown", 0)
+                    _rd_discount    = _rev_assumptions_rd.get("discount_rate")
+                    _rd_terminal    = _rev_assumptions_rd.get("terminal_growth")
+                    _rd_hist_cagr   = _rev_assumptions_rd.get("hist_fcf_growth")
+                    _rd_analyst_rev = _rev_assumptions_rd.get("analyst_revenue_growth")
+
+                    # Revenue mode: derive base_fcf from revenue × starting margin
+                    if dcf_mode == "Revenue" and _rd_base_fcf is None:
+                        _base_rev   = _rev_assumptions_rd.get("base_revenue", 0)
+                        _start_marg = _rev_assumptions_rd.get("starting_fcf_margin",
+                                        _rev_assumptions_rd.get("target_fcf_margin", 0))
+                        if _base_rev and _start_marg:
+                            _rd_base_fcf = _base_rev * (_start_marg / 100.0)
+
+                    if (dcf_mode == "FCF" and
+                            all(v is not None for v in [_rd_base_fcf, _rd_shares, _rd_discount, _rd_terminal])
+                            and _rd_base_fcf > 0 and _rd_shares > 0 and _dcf_current_price and _dcf_current_price > 0):
+
+                        st.markdown("#### Reverse DCF — What Growth Rate Does the Market Expect?")
+                        st.caption(
+                            "Flips the question: instead of projecting a price from assumed growth, "
+                            "we solve for the FCF growth rate that exactly justifies today's price. "
+                            "Uses your current WACC and terminal growth settings."
+                        )
+
+                        _rd_result = compute_reverse_dcf(
+                            base_fcf=_rd_base_fcf,
+                            current_price=_dcf_current_price,
+                            shares=_rd_shares,
+                            net_debt=_rd_net_debt or 0.0,
+                            discount_rate=(_rd_discount or 10.0) / 100.0,
+                            terminal_growth=(_rd_terminal or 2.5) / 100.0,
+                            annual_debt_paydown=(_rd_paydown or 0.0),
+                        )
+
+                        _rd_direction = _rd_result.get("direction")
+                        _rd_implied   = _rd_result.get("implied_growth")
+                        _rd_msg       = _rd_result.get("message")
+
+                        if _rd_direction == "solved" and _rd_implied is not None:
+                            # Determine assessment
+                            _hist_pct  = (_rd_hist_cagr or 0.0)   # already in %
+                            _anlst_pct = (_rd_analyst_rev or 0.0)  # already in %
+
+                            if _rd_implied < -5:
+                                _rd_label  = "🔴 Deeply Pessimistic"
+                                _rd_color  = "#f87171"
+                                _rd_interp = (
+                                    f"The market is pricing in **{_rd_implied:.1f}% annual FCF decline**. "
+                                    "This implies significant business deterioration — the stock may be "
+                                    "a deep value opportunity if that pessimism is excessive, or a value "
+                                    "trap if the decline is real."
+                                )
+                            elif _rd_implied < 2:
+                                _rd_label  = "🟡 Pessimistic / Low Expectations"
+                                _rd_color  = "#fbbf24"
+                                _rd_interp = (
+                                    f"The market expects roughly **{_rd_implied:.1f}% annual FCF growth** — "
+                                    "near zero or slight decline. Low bar to clear. "
+                                    "Any positive surprise could re-rate the stock."
+                                )
+                            elif _rd_implied < 8:
+                                _rd_label  = "🟢 Reasonable / Modest Expectations"
+                                _rd_color  = "#4ade80"
+                                _rd_interp = (
+                                    f"The market prices in **{_rd_implied:.1f}% annual FCF growth** — "
+                                    "a moderate, achievable expectation for most established businesses."
+                                )
+                            elif _rd_implied < 15:
+                                _rd_label  = "🟡 Elevated Expectations"
+                                _rd_color  = "#fbbf24"
+                                _rd_interp = (
+                                    f"The market expects **{_rd_implied:.1f}% annual FCF growth** — "
+                                    "above-average. The company needs to execute consistently to justify "
+                                    "this price."
+                                )
+                            else:
+                                _rd_label  = "🔴 Aggressive / High Risk"
+                                _rd_color  = "#f87171"
+                                _rd_interp = (
+                                    f"The market bakes in **{_rd_implied:.1f}% annual FCF growth** — "
+                                    "very aggressive. One missed quarter can be painful."
+                                )
+
+                            _rd_cols = st.columns(3)
+                            with _rd_cols[0]:
+                                st.metric(
+                                    "Market-Implied FCF Growth",
+                                    f"{_rd_implied:+.1f}%/yr",
+                                    help="The flat annual FCF growth rate that makes DCF value = current price, "
+                                         "using your WACC and terminal growth inputs."
+                                )
+                            with _rd_cols[1]:
+                                if _rd_hist_cagr is not None:
+                                    st.metric(
+                                        "Historical FCF CAGR",
+                                        f"{_rd_hist_cagr:+.1f}%/yr",
+                                        delta=f"{_rd_implied - _rd_hist_cagr:+.1f}% vs implied",
+                                        delta_color="inverse",
+                                        help="Actual FCF CAGR from historical statements."
+                                    )
+                                else:
+                                    st.metric("Historical FCF CAGR", "N/A")
+                            with _rd_cols[2]:
+                                if _rd_analyst_rev is not None:
+                                    st.metric(
+                                        "Analyst Revenue Growth",
+                                        f"{_rd_analyst_rev:+.1f}%/yr",
+                                        delta=f"{_rd_implied - _rd_analyst_rev:+.1f}% vs implied",
+                                        delta_color="inverse",
+                                        help="Consensus analyst revenue growth CAGR (for reference — not FCF)."
+                                    )
+                                else:
+                                    st.metric("Analyst Revenue Growth", "N/A")
+
+                            st.markdown(
+                                f"<div style='padding:10px 14px; border-left: 3px solid {_rd_color}; "
+                                f"background: rgba(255,255,255,0.04); border-radius:4px; margin-top:8px'>"
+                                f"<strong style='color:{_rd_color}'>{_rd_label}</strong><br>"
+                                f"<span style='font-size:0.9em'>{_rd_interp}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                        elif _rd_direction in ("below_floor", "above_ceiling"):
+                            _rd_color = "#4ade80" if _rd_direction == "below_floor" else "#f87171"
+                            st.markdown(
+                                f"<div style='padding:10px 14px; border-left: 3px solid {_rd_color}; "
+                                f"background: rgba(255,255,255,0.04); border-radius:4px'>"
+                                f"<span style='font-size:0.9em'>{_rd_msg}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
 
                     # --- Monte Carlo simulation ---
                     _mc_assumptions = dcf_display.get("assumptions", {})
