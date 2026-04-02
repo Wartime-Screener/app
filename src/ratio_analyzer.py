@@ -1494,6 +1494,99 @@ def compute_reverse_dcf(
     }
 
 
+def compute_reverse_revenue_dcf(
+    base_revenue: float,
+    fcf_margin: float,
+    current_price: float,
+    shares: float,
+    net_debt: float,
+    discount_rate: float,
+    terminal_growth: float,
+    projection_years: int = 10,
+    annual_debt_paydown: float = 0.0,
+) -> dict:
+    """
+    Reverse Revenue DCF: solve for the implied annual revenue growth rate that
+    makes the revenue-based DCF intrinsic value equal the current market price.
+
+    FCF each year = projected_revenue × fcf_margin (constant margin assumption).
+    Uses bisection (60 iterations).
+
+    Args:
+        base_revenue:      Most recent annual revenue (dollars).
+        fcf_margin:        Target FCF margin as a decimal (e.g. 0.12 for 12%).
+        current_price:     Current stock price per share.
+        shares:            Diluted shares outstanding.
+        net_debt:          Current net debt (total debt - cash).
+        discount_rate:     WACC as decimal.
+        terminal_growth:   Terminal growth rate as decimal.
+        projection_years:  Number of projection years (default 10).
+        annual_debt_paydown: Annual debt reduction in dollars.
+
+    Returns:
+        dict with implied_growth (%), direction, message.
+    """
+    if not (base_revenue and base_revenue > 0 and fcf_margin and fcf_margin > 0
+            and current_price and current_price > 0 and shares and shares > 0):
+        return {"implied_growth": None, "direction": "error",
+                "message": "Insufficient data for Reverse Revenue DCF"}
+
+    net_debt_at_terminal = max(net_debt - annual_debt_paydown * projection_years, 0.0)
+    target_equity_value = current_price * shares
+    target_ev = target_equity_value + net_debt_at_terminal
+
+    def _ev_at_rev_growth(g: float) -> float:
+        revenue = base_revenue
+        total_pv = 0.0
+        for year in range(1, projection_years + 1):
+            revenue = revenue * (1 + g)
+            fcf = revenue * fcf_margin
+            total_pv += fcf / (1 + discount_rate) ** year
+        terminal_fcf = revenue * fcf_margin * (1 + terminal_growth)
+        tv = terminal_fcf / (discount_rate - terminal_growth)
+        tv_pv = tv / (1 + discount_rate) ** projection_years
+        return total_pv + tv_pv
+
+    lo, hi = -0.30, 1.00
+    ev_lo = _ev_at_rev_growth(lo)
+    ev_hi = _ev_at_rev_growth(hi)
+
+    if ev_lo > target_ev:
+        return {
+            "implied_growth": None,
+            "direction": "below_floor",
+            "message": (
+                "Market price implies worse than −30% annual revenue decline — "
+                "stock appears deeply undervalued relative to current revenue."
+            ),
+        }
+    if ev_hi < target_ev:
+        return {
+            "implied_growth": None,
+            "direction": "above_ceiling",
+            "message": (
+                "Market price implies more than +100% annual revenue growth — "
+                "stock is priced for extraordinary expectations."
+            ),
+        }
+
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if _ev_at_rev_growth(mid) < target_ev:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-8:
+            break
+
+    implied_g = (lo + hi) / 2.0
+    return {
+        "implied_growth": round(implied_g * 100, 2),
+        "direction": "solved",
+        "message": None,
+    }
+
+
 def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
                     history_years: int | None = None,
                     risk_free_rate: float | None = None) -> dict:

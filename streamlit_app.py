@@ -34,7 +34,7 @@ from src.commodity_client import (
     COMMODITY_SYMBOLS, get_commodity_quote, get_commodity_quote_by_symbol,
     get_commodity_history, clear_cache as clear_commodity_cache
 )
-from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, compute_reverse_dcf, _load_scoring_config
+from src.ratio_analyzer import analyze_ticker, compute_dcf_valuation, compute_revenue_dcf_valuation, run_dcf_monte_carlo, compute_reverse_dcf, compute_reverse_revenue_dcf, _load_scoring_config
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
@@ -2082,16 +2082,23 @@ elif active_tab == "Ticker Deep Dive":
                         )
 
                     # --- Reverse DCF ---
-                    # Use _dcf (initial calculation) for stable data that doesn't change
-                    # with slider adjustments (base FCF, shares, net debt).
-                    # Use live slider values (user_discount, user_terminal, user_debt_paydown)
-                    # so the result updates immediately without needing to click Recalculate.
+                    # Use initial calculation for stable inputs (FCF/revenue/shares/net debt).
+                    # Use live slider values for WACC + terminal so result updates immediately.
                     _rd_init_assumptions = _dcf.get("assumptions", {})
                     _rd_base_fcf    = _rd_init_assumptions.get("base_fcf")
                     _rd_shares      = _rd_init_assumptions.get("shares_outstanding")
                     _rd_net_debt    = _rd_init_assumptions.get("net_debt", 0)
                     _rd_hist_cagr   = _rd_init_assumptions.get("hist_fcf_growth")
                     _rd_analyst_rev = _rd_init_assumptions.get("analyst_revenue_growth")
+
+                    # Revenue mode inputs — pulled from the revenue DCF initial calculation
+                    _rd_rev_assumptions = _rev_dcf_init.get("assumptions", {}) if dcf_mode == "Revenue" else {}
+                    _rd_base_revenue    = _rd_rev_assumptions.get("base_revenue")
+                    _rd_fcf_margin      = _rd_rev_assumptions.get("target_fcf_margin")  # in %
+                    _rd_rev_shares      = _rd_rev_assumptions.get("shares_outstanding")
+                    _rd_rev_net_debt    = _rd_rev_assumptions.get("net_debt", 0)
+                    _rd_hist_rev_cagr   = _rd_rev_assumptions.get("hist_rev_growth")
+                    _rd_rev_analyst     = _rd_rev_assumptions.get("analyst_revenue_growth")
 
                     if (dcf_mode == "FCF" and
                             _rd_base_fcf and _rd_base_fcf > 0
@@ -2210,6 +2217,123 @@ elif active_tab == "Ticker Deep Dive":
                                 f"<div style='padding:10px 14px; border-left: 3px solid {_rd_color}; "
                                 f"background: rgba(255,255,255,0.04); border-radius:4px'>"
                                 f"<span style='font-size:0.9em'>{_rd_msg}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                    # --- Reverse Revenue DCF (Revenue mode only) ---
+                    elif (dcf_mode == "Revenue" and
+                            _rd_base_revenue and _rd_base_revenue > 0
+                            and _rd_fcf_margin and _rd_fcf_margin > 0
+                            and _rd_rev_shares and _rd_rev_shares > 0
+                            and _dcf_current_price and _dcf_current_price > 0):
+
+                        st.markdown("#### Reverse DCF — What Revenue Growth Does the Market Expect?")
+                        st.caption(
+                            "Solves for the annual revenue growth rate that exactly justifies today's price, "
+                            "holding FCF margin constant at your target. "
+                            "Updates live with your WACC and terminal growth inputs above."
+                        )
+
+                        _rrd_result = compute_reverse_revenue_dcf(
+                            base_revenue=_rd_base_revenue,
+                            fcf_margin=_rd_fcf_margin / 100.0,
+                            current_price=_dcf_current_price,
+                            shares=_rd_rev_shares,
+                            net_debt=_rd_rev_net_debt or 0.0,
+                            discount_rate=user_discount / 100.0,
+                            terminal_growth=user_terminal / 100.0,
+                            annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else 0.0,
+                        )
+
+                        _rrd_direction = _rrd_result.get("direction")
+                        _rrd_implied   = _rrd_result.get("implied_growth")
+                        _rrd_msg       = _rrd_result.get("message")
+
+                        if _rrd_direction == "solved" and _rrd_implied is not None:
+                            if _rrd_implied < -5:
+                                _rrd_label  = "🔴 Deeply Pessimistic"
+                                _rrd_color  = "#f87171"
+                                _rrd_interp = (
+                                    f"The market prices in **{_rrd_implied:.1f}% annual revenue decline**. "
+                                    "Either the business is expected to shrink significantly, or this "
+                                    "is a deep value opportunity if that pessimism is overdone."
+                                )
+                            elif _rrd_implied < 2:
+                                _rrd_label  = "🟡 Pessimistic / Low Expectations"
+                                _rrd_color  = "#fbbf24"
+                                _rrd_interp = (
+                                    f"The market expects roughly **{_rrd_implied:.1f}% annual revenue growth** — "
+                                    "near flat. Any positive surprise could re-rate the stock meaningfully."
+                                )
+                            elif _rrd_implied < 8:
+                                _rrd_label  = "🟢 Reasonable / Modest Expectations"
+                                _rrd_color  = "#4ade80"
+                                _rrd_interp = (
+                                    f"The market prices in **{_rrd_implied:.1f}% annual revenue growth** — "
+                                    "a moderate, achievable expectation for most established businesses."
+                                )
+                            elif _rrd_implied < 15:
+                                _rrd_label  = "🟡 Elevated Expectations"
+                                _rrd_color  = "#fbbf24"
+                                _rrd_interp = (
+                                    f"The market expects **{_rrd_implied:.1f}% annual revenue growth** — "
+                                    "above-average. Consistent execution required to justify this price."
+                                )
+                            else:
+                                _rrd_label  = "🔴 Aggressive / High Risk"
+                                _rrd_color  = "#f87171"
+                                _rrd_interp = (
+                                    f"The market bakes in **{_rrd_implied:.1f}% annual revenue growth** — "
+                                    "very aggressive. One missed quarter can be painful."
+                                )
+
+                            _rrd_cols = st.columns(3)
+                            with _rrd_cols[0]:
+                                st.metric(
+                                    "Market-Implied Revenue Growth",
+                                    f"{_rrd_implied:+.1f}%/yr",
+                                    help="Annual revenue growth rate that makes DCF value = current price, "
+                                         "holding FCF margin constant at your target."
+                                )
+                            with _rrd_cols[1]:
+                                if _rd_hist_rev_cagr is not None:
+                                    st.metric(
+                                        "Historical Revenue CAGR",
+                                        f"{_rd_hist_rev_cagr:+.1f}%/yr",
+                                        delta=f"{_rrd_implied - _rd_hist_rev_cagr:+.1f}% vs implied",
+                                        delta_color="inverse",
+                                        help="Actual revenue CAGR from historical income statements."
+                                    )
+                                else:
+                                    st.metric("Historical Revenue CAGR", "N/A")
+                            with _rrd_cols[2]:
+                                if _rd_rev_analyst is not None:
+                                    st.metric(
+                                        "Analyst Revenue Growth",
+                                        f"{_rd_rev_analyst:+.1f}%/yr",
+                                        delta=f"{_rrd_implied - _rd_rev_analyst:+.1f}% vs implied",
+                                        delta_color="inverse",
+                                        help="Consensus analyst revenue growth CAGR."
+                                    )
+                                else:
+                                    st.metric("Analyst Revenue Growth", "N/A")
+
+                            st.markdown(
+                                f"<div style='padding:10px 14px; border-left: 3px solid {_rrd_color}; "
+                                f"background: rgba(255,255,255,0.04); border-radius:4px; margin-top:8px'>"
+                                f"<strong style='color:{_rrd_color}'>{_rrd_label}</strong><br>"
+                                f"<span style='font-size:0.9em'>{_rrd_interp}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                        elif _rrd_direction in ("below_floor", "above_ceiling"):
+                            _rrd_color = "#4ade80" if _rrd_direction == "below_floor" else "#f87171"
+                            st.markdown(
+                                f"<div style='padding:10px 14px; border-left: 3px solid {_rrd_color}; "
+                                f"background: rgba(255,255,255,0.04); border-radius:4px'>"
+                                f"<span style='font-size:0.9em'>{_rrd_msg}</span>"
                                 f"</div>",
                                 unsafe_allow_html=True,
                             )
