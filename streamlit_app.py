@@ -2070,34 +2070,27 @@ elif active_tab == "Ticker Deep Dive":
                         )
 
                     # --- Reverse DCF ---
-                    _rev_assumptions_rd = dcf_display.get("assumptions", {})
-                    _rd_base_fcf    = _rev_assumptions_rd.get("base_fcf")
-                    _rd_shares      = _rev_assumptions_rd.get("shares_outstanding")
-                    _rd_net_debt    = _rev_assumptions_rd.get("net_debt_at_terminal",
-                                        _rev_assumptions_rd.get("net_debt", 0))
-                    _rd_paydown     = _rev_assumptions_rd.get("annual_debt_paydown", 0)
-                    _rd_discount    = _rev_assumptions_rd.get("discount_rate")
-                    _rd_terminal    = _rev_assumptions_rd.get("terminal_growth")
-                    _rd_hist_cagr   = _rev_assumptions_rd.get("hist_fcf_growth")
-                    _rd_analyst_rev = _rev_assumptions_rd.get("analyst_revenue_growth")
-
-                    # Revenue mode: derive base_fcf from revenue × starting margin
-                    if dcf_mode == "Revenue" and _rd_base_fcf is None:
-                        _base_rev   = _rev_assumptions_rd.get("base_revenue", 0)
-                        _start_marg = _rev_assumptions_rd.get("starting_fcf_margin",
-                                        _rev_assumptions_rd.get("target_fcf_margin", 0))
-                        if _base_rev and _start_marg:
-                            _rd_base_fcf = _base_rev * (_start_marg / 100.0)
+                    # Use _dcf (initial calculation) for stable data that doesn't change
+                    # with slider adjustments (base FCF, shares, net debt).
+                    # Use live slider values (user_discount, user_terminal, user_debt_paydown)
+                    # so the result updates immediately without needing to click Recalculate.
+                    _rd_init_assumptions = _dcf.get("assumptions", {})
+                    _rd_base_fcf    = _rd_init_assumptions.get("base_fcf")
+                    _rd_shares      = _rd_init_assumptions.get("shares_outstanding")
+                    _rd_net_debt    = _rd_init_assumptions.get("net_debt", 0)
+                    _rd_hist_cagr   = _rd_init_assumptions.get("hist_fcf_growth")
+                    _rd_analyst_rev = _rd_init_assumptions.get("analyst_revenue_growth")
 
                     if (dcf_mode == "FCF" and
-                            all(v is not None for v in [_rd_base_fcf, _rd_shares, _rd_discount, _rd_terminal])
-                            and _rd_base_fcf > 0 and _rd_shares > 0 and _dcf_current_price and _dcf_current_price > 0):
+                            _rd_base_fcf and _rd_base_fcf > 0
+                            and _rd_shares and _rd_shares > 0
+                            and _dcf_current_price and _dcf_current_price > 0):
 
                         st.markdown("#### Reverse DCF — What Growth Rate Does the Market Expect?")
                         st.caption(
                             "Flips the question: instead of projecting a price from assumed growth, "
                             "we solve for the FCF growth rate that exactly justifies today's price. "
-                            "Uses your current WACC and terminal growth settings."
+                            "Updates live with your WACC and terminal growth inputs above."
                         )
 
                         _rd_result = compute_reverse_dcf(
@@ -2105,9 +2098,9 @@ elif active_tab == "Ticker Deep Dive":
                             current_price=_dcf_current_price,
                             shares=_rd_shares,
                             net_debt=_rd_net_debt or 0.0,
-                            discount_rate=(_rd_discount or 10.0) / 100.0,
-                            terminal_growth=(_rd_terminal or 2.5) / 100.0,
-                            annual_debt_paydown=(_rd_paydown or 0.0),
+                            discount_rate=user_discount / 100.0,
+                            terminal_growth=user_terminal / 100.0,
+                            annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else 0.0,
                         )
 
                         _rd_direction = _rd_result.get("direction")
