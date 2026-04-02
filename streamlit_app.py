@@ -1734,19 +1734,17 @@ elif active_tab == "Ticker Deep Dive":
                             _paydown_help = (
                                 f"Auto-estimated from balance sheet history: ${_paydown_default:,.0f}M/yr. "
                                 f"Current net debt: ${_net_debt_now / 1e9:.2f}B. "
-                                "Set to 0 to use static net debt (no paydown modeled)."
+                                "Positive = paying down debt. Negative = issuing new debt (e.g. utilities funding capex). "
+                                "Set to 0 to use static net debt."
                             )
-                            if _net_debt_now > 0:
-                                user_debt_paydown = st.number_input(
-                                    "Annual Debt Paydown ($M)",
-                                    min_value=0.0, max_value=float(_net_debt_now / 1e6),
-                                    value=float(_paydown_default),
-                                    step=10.0, format="%.0f",
-                                    key="dcf_debt_paydown",
-                                    help=_paydown_help,
-                                )
-                            else:
-                                user_debt_paydown = 0.0
+                            user_debt_paydown = st.number_input(
+                                "Annual Debt Paydown ($M)",
+                                min_value=-2000.0, max_value=2000.0,
+                                value=float(_paydown_default),
+                                step=10.0, format="%.0f",
+                                key="dcf_debt_paydown",
+                                help=_paydown_help,
+                            )
 
                             recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
@@ -1895,21 +1893,19 @@ elif active_tab == "Ticker Deep Dive":
                                 _auto_paydown_r = _rev_assumptions.get("auto_debt_paydown")
                                 _net_debt_r = _rev_assumptions.get("net_debt", 0)
                                 _paydown_default_r = round((_auto_paydown_r or 0) / 1e6, 1)
-                                if _net_debt_r > 0:
-                                    user_debt_paydown_r = st.number_input(
-                                        "Annual Debt Paydown ($M)",
-                                        min_value=0.0, max_value=float(_net_debt_r / 1e6),
-                                        value=float(_paydown_default_r),
-                                        step=10.0, format="%.0f",
-                                        key="dcf_rev_debt_paydown",
-                                        help=(
-                                            f"Auto-estimated: ${_paydown_default_r:,.0f}M/yr from balance sheet history. "
-                                            f"Net debt today: ${_net_debt_r / 1e9:.2f}B. "
-                                            "Reduces net debt subtracted at terminal value."
-                                        ),
-                                    )
-                                else:
-                                    user_debt_paydown_r = 0.0
+                                user_debt_paydown_r = st.number_input(
+                                    "Annual Debt Paydown ($M)",
+                                    min_value=-2000.0, max_value=2000.0,
+                                    value=float(_paydown_default_r),
+                                    step=10.0, format="%.0f",
+                                    key="dcf_rev_debt_paydown",
+                                    help=(
+                                        f"Auto-estimated: ${_paydown_default_r:,.0f}M/yr from balance sheet history. "
+                                        f"Net debt today: ${_net_debt_r / 1e9:.2f}B. "
+                                        "Positive = paying down debt. Negative = issuing new debt "
+                                        "(e.g. utilities funding capex). Affects terminal value calculation."
+                                    ),
+                                )
                             with _rev_extra_cols[1]:
                                 _start_margin = _rev_assumptions.get("starting_fcf_margin", _default_fcf_margin)
                                 use_margin_rev = st.checkbox(
