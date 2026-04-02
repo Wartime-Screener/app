@@ -1619,6 +1619,18 @@ elif active_tab == "Ticker Deep Dive":
                     # Initialize dcf_display so Valuation section always has something to read
                     dcf_display = _dcf or {}
 
+                    # Safe defaults — overwritten by whichever form actually renders.
+                    # Prevents UnboundLocalError when FCF mode has no usable data (negative FCF)
+                    # and the form block is skipped entirely.
+                    use_multistage = False
+                    recalc = False
+                    user_growth = assumptions.get("growth_rate", 5.0)
+                    user_discount = max(3.0, min(20.0, float(assumptions.get("discount_rate", 10.0))))
+                    user_terminal = max(1.0, min(4.0, float(assumptions.get("terminal_growth", 2.5))))
+                    user_debt_paydown = 0.0
+                    p1_rate = p2_rate = p3_rate = user_growth
+                    p1_years = p2_years = p3_years = 0
+
                     if dcf_mode == "FCF" and not dcf_has_sliders:
                         # FCF mode selected but no usable FCF data
                         st.warning(
