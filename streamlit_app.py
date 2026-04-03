@@ -3805,7 +3805,7 @@ elif active_tab == "Portfolio Tracker":
             else:
                 structured_notes = existing_notes if existing_notes else []
 
-            # Display existing notes with per-line delete buttons
+            # Display existing notes with per-line edit and delete buttons
             if structured_notes:
                 _del_counters = {0: 0, 1: 0, 2: 0}
                 _display_lines = []
@@ -3827,16 +3827,9 @@ elif active_tab == "Portfolio Tracker":
                         c = _del_counters[2] % 26
                         marker = f"{chr(97 + c)}{chr(97 + c)})"
                         _del_counters[2] += 1
-                    _display_lines.append((idx, f"{indent}{marker} {txt}"))
+                    _display_lines.append((idx, lvl, txt, f"{indent}{marker} {txt}"))
 
-                st.markdown(
-                    """<div style="background-color: #1e1e2e; border: 1px solid #444;
-                    border-radius: 8px; padding: 16px; margin-bottom: 8px;
-                    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
-                    line-height: 1.8; color: #e0e0e0;">""",
-                    unsafe_allow_html=True,
-                )
-                # Use session_state flag to handle deletion without shifting keys
+                # Handle pending delete
                 _del_key = st.session_state.get("_note_to_delete", None)
                 if _del_key is not None:
                     st.session_state.pop("_note_to_delete", None)
@@ -3845,16 +3838,57 @@ elif active_tab == "Portfolio Tracker":
                         update_position_notes(note_pos["id"], structured_notes)
                         st.rerun()
 
-                for note_idx_display, (orig_idx, line_html) in enumerate(_display_lines):
-                    dcol1, dcol2 = st.columns([20, 1])
-                    with dcol1:
-                        st.markdown(line_html, unsafe_allow_html=True)
-                    with dcol2:
-                        if st.button("✕", key=f"delnote_{note_pos['id']}_{note_idx_display}",
-                                     help="Delete this note"):
-                            st.session_state["_note_to_delete"] = orig_idx
-                            st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
+                # Track which note is being edited (keyed by position id to avoid cross-position conflicts)
+                _edit_state_key = f"_note_editing_{note_pos['id']}"
+                _editing_idx = st.session_state.get(_edit_state_key, None)
+
+                for note_idx_display, (orig_idx, lvl, txt, line_html) in enumerate(_display_lines):
+                    if _editing_idx == orig_idx:
+                        # Inline edit mode — prefix with indentation markers
+                        prefix = ("~~" if lvl == 2 else "~" if lvl == 1 else "")
+                        ecol1, ecol2, ecol3 = st.columns([18, 1, 1])
+                        with ecol1:
+                            edited_text = st.text_input(
+                                "Edit note",
+                                value=f"{prefix}{txt}",
+                                key=f"editinput_{note_pos['id']}_{orig_idx}",
+                                label_visibility="collapsed",
+                            )
+                        with ecol2:
+                            if st.button("✓", key=f"savenote_{note_pos['id']}_{orig_idx}",
+                                         help="Save edit"):
+                                new_text = edited_text.strip()
+                                if new_text:
+                                    if new_text.startswith("~~"):
+                                        new_lvl, new_text = 2, new_text[2:].lstrip()
+                                    elif new_text.startswith("~"):
+                                        new_lvl, new_text = 1, new_text[1:].lstrip()
+                                    else:
+                                        new_lvl = 0
+                                    structured_notes[orig_idx] = {"text": new_text.strip(), "level": new_lvl}
+                                    update_position_notes(note_pos["id"], structured_notes)
+                                st.session_state.pop(_edit_state_key, None)
+                                st.rerun()
+                        with ecol3:
+                            if st.button("✕", key=f"canceledit_{note_pos['id']}_{orig_idx}",
+                                         help="Cancel edit"):
+                                st.session_state.pop(_edit_state_key, None)
+                                st.rerun()
+                    else:
+                        # Normal display mode
+                        dcol1, dcol2, dcol3 = st.columns([18, 1, 1])
+                        with dcol1:
+                            st.markdown(line_html, unsafe_allow_html=True)
+                        with dcol2:
+                            if st.button("✎", key=f"editnote_{note_pos['id']}_{note_idx_display}",
+                                         help="Edit this note"):
+                                st.session_state[_edit_state_key] = orig_idx
+                                st.rerun()
+                        with dcol3:
+                            if st.button("✕", key=f"delnote_{note_pos['id']}_{note_idx_display}",
+                                         help="Delete this note"):
+                                st.session_state["_note_to_delete"] = orig_idx
+                                st.rerun()
 
             st.caption("Start a line with **~** to indent (a, b, c) or **~~** to double-indent (aa, bb, cc). "
                        "Each line becomes a separate note.")
