@@ -3782,11 +3782,18 @@ elif active_tab == "Portfolio Tracker":
         def _research_notes_fragment():
             st.subheader("📝 Research Notes")
 
+            # Reload fresh data inside fragment so notes appear immediately after saving
+            # (fragment reruns don't re-execute the outer page scope where positions is defined)
+            _fresh_positions = load_portfolio().get("positions", [])
+            if not _fresh_positions:
+                st.info("No positions yet.")
+                return
+
             # Select which position to add notes to
-            note_options = [f"{p['ticker']} — {p['buy_date']} ({p['thesis_tag']})" for p in positions]
+            note_options = [f"{p['ticker']} — {p['buy_date']} ({p['thesis_tag']})" for p in _fresh_positions]
             note_selection = st.selectbox("Select position", note_options, key="note_pos_select")
             note_idx = note_options.index(note_selection)
-            note_pos = positions[note_idx]
+            note_pos = _fresh_positions[note_idx]
 
             # Get existing notes (migrate from old string format if needed)
             existing_notes = note_pos.get("notes", "")
