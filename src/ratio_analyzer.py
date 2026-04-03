@@ -534,7 +534,8 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                            analyst_estimates: list[dict] | None = None,
                            growth_stages: list[dict] | None = None,
                            risk_free_rate: float | None = None,
-                           annual_debt_paydown: float | None = None) -> dict:
+                           annual_debt_paydown: float | None = None,
+                           annual_share_change: float | None = None) -> dict:
     """
     Discounted Cash Flow valuation — "what has to be true" model.
 
@@ -602,6 +603,20 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     if not shares or shares <= 0:
         return {"dcf_price": None, "warnings": ["No shares outstanding data"],
                 "assumptions": {}, "has_data": False}
+
+    # --- Historical share count change (buybacks = negative, dilution = positive) ---
+    hist_share_change = None
+    share_count_values = []
+    for stmt in income_statements[:5]:
+        s = _safe_float(stmt.get("weightedAverageShsOutDil") or stmt.get("weightedAverageShsOut"))
+        if s and s > 0:
+            share_count_values.append(s)
+    if len(share_count_values) >= 2:
+        hist_share_change = (share_count_values[0] / share_count_values[-1]) ** (1 / (len(share_count_values) - 1)) - 1
+
+    resolved_share_change = annual_share_change if annual_share_change is not None else (hist_share_change or 0.0)
+    resolved_share_change = max(-0.20, min(0.20, resolved_share_change))
+    terminal_shares = max(shares * (1 + resolved_share_change) ** projection_years, shares * 0.01)
 
     # --- Net debt (total debt - cash) for EV → equity bridge ---
     net_debt = 0.0  # default: assume no net debt if data unavailable
@@ -826,11 +841,13 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                 "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
                 "analyst_num_analysts": analyst_num_analysts,
                 "wacc_breakdown": wacc_breakdown,
+                "annual_share_change": round(resolved_share_change * 100, 2),
+                "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
             },
             "projected_fcfs": projected_fcfs,
             "sensitivity": [],
         }
-    intrinsic_per_share = equity_value / shares
+    intrinsic_per_share = equity_value / terminal_shares
 
     current_price = _safe_float(profile.get("price"))
     upside = None
@@ -874,7 +891,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             t_pv = t_val / (1 + d) ** projection_years
             ev = pv_sum + t_pv
             eq = ev - net_debt_at_terminal
-            price = max(eq, 0) / shares
+            price = max(eq, 0) / terminal_shares
             row[f"{d*100:.1f}%"] = round(price, 2)
         sensitivity.append(row)
 
@@ -899,6 +916,9 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
             "analyst_num_analysts": analyst_num_analysts,
             "wacc_breakdown": wacc_breakdown,
+            "annual_share_change": round(resolved_share_change * 100, 2),
+            "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
+            "terminal_shares": round(terminal_shares, 0),
         },
         "projected_fcfs": projected_fcfs,
         "terminal_value": round(terminal_value, 0),
@@ -1045,7 +1065,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                                    growth_stages: list[dict] | None = None,
                                    risk_free_rate: float | None = None,
                                    annual_debt_paydown: float | None = None,
-                                   use_margin_reversion: bool = True) -> dict:
+                                   use_margin_reversion: bool = True,
+                                   annual_share_change: float | None = None) -> dict:
     """
     Revenue-based DCF — derives FCF from projected revenue × target FCF margin.
 
@@ -1114,6 +1135,20 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     if not shares or shares <= 0:
         return {"dcf_price": None, "warnings": ["No shares outstanding data"],
                 "assumptions": {}, "has_data": False}
+
+    # --- Historical share count change (buybacks = negative, dilution = positive) ---
+    hist_share_change_r = None
+    share_count_values_r = []
+    for stmt in income_statements[:5]:
+        s = _safe_float(stmt.get("weightedAverageShsOutDil") or stmt.get("weightedAverageShsOut"))
+        if s and s > 0:
+            share_count_values_r.append(s)
+    if len(share_count_values_r) >= 2:
+        hist_share_change_r = (share_count_values_r[0] / share_count_values_r[-1]) ** (1 / (len(share_count_values_r) - 1)) - 1
+
+    resolved_share_change_r = annual_share_change if annual_share_change is not None else (hist_share_change_r or 0.0)
+    resolved_share_change_r = max(-0.20, min(0.20, resolved_share_change_r))
+    terminal_shares_r = max(shares * (1 + resolved_share_change_r) ** projection_years, shares * 0.01)
 
     # --- Net debt ---
     net_debt = 0.0
@@ -1318,12 +1353,14 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
                 "analyst_num_analysts": analyst_num_analysts,
                 "wacc_breakdown": wacc_breakdown,
+                "annual_share_change": round(resolved_share_change_r * 100, 2),
+                "hist_share_change": round(hist_share_change_r * 100, 1) if hist_share_change_r is not None else None,
             },
             "projected_fcfs": projected_fcfs,
             "sensitivity": [],
         }
 
-    intrinsic_per_share = equity_value / shares
+    intrinsic_per_share = equity_value / terminal_shares_r
     current_price = _safe_float(profile.get("price"))
     upside = None
     if current_price and current_price > 0:
@@ -1364,7 +1401,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             t_pv = t_val / (1 + d) ** projection_years
             ev = pv_sum + t_pv
             eq = ev - net_debt_at_terminal
-            price = max(eq, 0) / shares
+            price = max(eq, 0) / terminal_shares_r
             row[f"{d*100:.1f}%"] = round(price, 2)
         sensitivity.append(row)
 
@@ -1394,6 +1431,9 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "analyst_revenue_growth": round(analyst_revenue_growth * 100, 1) if analyst_revenue_growth is not None else None,
             "analyst_num_analysts": analyst_num_analysts,
             "wacc_breakdown": wacc_breakdown,
+            "annual_share_change": round(resolved_share_change_r * 100, 2),
+            "hist_share_change": round(hist_share_change_r * 100, 1) if hist_share_change_r is not None else None,
+            "terminal_shares": round(terminal_shares_r, 0),
         },
         "projected_fcfs": projected_fcfs,
         "terminal_value": round(terminal_value, 0),
@@ -1414,6 +1454,7 @@ def compute_reverse_dcf(
     terminal_growth: float,
     projection_years: int = 10,
     annual_debt_paydown: float = 0.0,
+    annual_share_change: float = 0.0,
 ) -> dict:
     """
     Reverse DCF: solve for the implied flat FCF growth rate that makes the DCF
@@ -1433,8 +1474,11 @@ def compute_reverse_dcf(
                 "message": "Insufficient data for Reverse DCF"}
 
     net_debt_at_terminal = max(net_debt - annual_debt_paydown * projection_years, 0.0)
-    # Equity value implied by current price
-    target_equity_value = current_price * shares
+    # Project terminal shares (buybacks reduce denominator, boosting per-share value)
+    _rev_share_chg = max(-0.20, min(0.20, annual_share_change))
+    terminal_shares = max(shares * (1 + _rev_share_chg) ** projection_years, shares * 0.01)
+    # Equity value implied by current price (using terminal shares to match forward DCF)
+    target_equity_value = current_price * terminal_shares
     # Enterprise value implied by current price
     target_ev = target_equity_value + net_debt_at_terminal
 
@@ -1504,6 +1548,7 @@ def compute_reverse_revenue_dcf(
     terminal_growth: float,
     projection_years: int = 10,
     annual_debt_paydown: float = 0.0,
+    annual_share_change: float = 0.0,
 ) -> dict:
     """
     Reverse Revenue DCF: solve for the implied annual revenue growth rate that
@@ -1532,7 +1577,9 @@ def compute_reverse_revenue_dcf(
                 "message": "Insufficient data for Reverse Revenue DCF"}
 
     net_debt_at_terminal = max(net_debt - annual_debt_paydown * projection_years, 0.0)
-    target_equity_value = current_price * shares
+    _rev_share_chg_r = max(-0.20, min(0.20, annual_share_change))
+    terminal_shares_rev = max(shares * (1 + _rev_share_chg_r) ** projection_years, shares * 0.01)
+    target_equity_value = current_price * terminal_shares_rev
     target_ev = target_equity_value + net_debt_at_terminal
 
     def _ev_at_rev_growth(g: float) -> float:
