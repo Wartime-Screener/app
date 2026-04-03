@@ -1765,6 +1765,23 @@ elif active_tab == "Ticker Deep Dive":
                                 help=_paydown_help,
                             )
 
+                            _hist_share_chg = assumptions.get("hist_share_change")
+                            _share_chg_default = float(_hist_share_chg) if _hist_share_chg is not None else 0.0
+                            _share_chg_type = "buyback" if _share_chg_default < -0.05 else ("dilution" if _share_chg_default > 0.05 else "neutral")
+                            user_share_change = st.number_input(
+                                "Annual Share Count Change (%)",
+                                min_value=-20.0, max_value=20.0,
+                                value=float(round(_share_chg_default, 1)),
+                                step=0.1, format="%.1f",
+                                key="dcf_share_change",
+                                help=(
+                                    f"Auto-detected from share history: {_share_chg_default:+.1f}%/yr ({_share_chg_type}). "
+                                    "Negative = buybacks shrinking share count (boosts per-share value). "
+                                    "Positive = stock comp dilution (reduces per-share value). "
+                                    "Applied by projecting terminal shares over the 10-year horizon."
+                                ),
+                            )
+
                             recalc = st.form_submit_button("🔄 Recalculate DCF", use_container_width=True)
 
                         dcf_display = _dcf
@@ -1791,6 +1808,7 @@ elif active_tab == "Ticker Deep Dive":
                                 growth_stages=stages,
                                 risk_free_rate=_risk_free_rate,
                                 annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else None,
+                                annual_share_change=user_share_change / 100.0,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -1906,8 +1924,8 @@ elif active_tab == "Ticker Deep Dive":
                                     f"{_rfr_label_r}"
                                 )
 
-                            # Margin reversion + debt paydown row
-                            _rev_extra_cols = st.columns(2)
+                            # Debt paydown + margin reversion + share change row
+                            _rev_extra_cols = st.columns(3)
                             with _rev_extra_cols[0]:
                                 _auto_paydown_r = _rev_assumptions.get("auto_debt_paydown")
                                 _net_debt_r = _rev_assumptions.get("net_debt", 0)
@@ -1935,7 +1953,24 @@ elif active_tab == "Ticker Deep Dive":
                                         f"When enabled, FCF margin starts at the most recent year's margin "
                                         f"({_start_margin:.1f}%) and linearly converges to your target margin "
                                         f"({_default_fcf_margin:.1f}%) by year 10. "
+                                        f"Historical median: {_hist_fcf_margin:.1f}% (used as default target). "
                                         "Disable to apply target margin immediately from year 1."
+                                    ),
+                                )
+                            with _rev_extra_cols[2]:
+                                _hist_share_chg_r = _rev_assumptions.get("hist_share_change")
+                                _share_chg_default_r = float(_hist_share_chg_r) if _hist_share_chg_r is not None else 0.0
+                                _share_chg_type_r = "buyback" if _share_chg_default_r < -0.05 else ("dilution" if _share_chg_default_r > 0.05 else "neutral")
+                                user_share_change_r = st.number_input(
+                                    "Annual Share Count Change (%)",
+                                    min_value=-20.0, max_value=20.0,
+                                    value=float(round(_share_chg_default_r, 1)),
+                                    step=0.1, format="%.1f",
+                                    key="dcf_rev_share_change",
+                                    help=(
+                                        f"Auto-detected: {_share_chg_default_r:+.1f}%/yr ({_share_chg_type_r}). "
+                                        "Negative = buybacks reducing share count (boosts per-share value). "
+                                        "Positive = dilution from stock comp."
                                     ),
                                 )
 
@@ -1967,6 +2002,7 @@ elif active_tab == "Ticker Deep Dive":
                                 risk_free_rate=_risk_free_rate,
                                 annual_debt_paydown=user_debt_paydown_r * 1e6 if user_debt_paydown_r else None,
                                 use_margin_reversion=use_margin_rev,
+                                annual_share_change=user_share_change_r / 100.0,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -2178,6 +2214,13 @@ elif active_tab == "Ticker Deep Dive":
                             f"  ·  Debt paydown: ${_rev_paydown/1e6:.0f}M/yr → Net Debt@Y10: ${_rev_nd_terminal/1e9:.2f}B"
                             if _rev_paydown > 0 else ""
                         )
+                        _rev_share_chg_disp = assumptions_updated.get("annual_share_change", 0)
+                        _rev_share_desc = (
+                            f"  ·  Buyback: {_rev_share_chg_disp:+.1f}%/yr → {assumptions_updated.get('terminal_shares', 0)/1e9:.2f}B shares@Y10"
+                            if _rev_share_chg_disp < -0.05 else (
+                                f"  ·  Dilution: {_rev_share_chg_disp:+.1f}%/yr" if _rev_share_chg_disp > 0.05 else ""
+                            )
+                        )
                         st.caption(
                             f"📊 Revenue-based  ·  Base Rev: ${base_rev/1e9:.2f}B  ·  "
                             f"{_margin_desc}  ·  "
@@ -2185,7 +2228,7 @@ elif active_tab == "Ticker Deep Dive":
                             f"WACC: {user_discount:.2f}%  ·  "
                             f"Terminal: {user_terminal:.2f}%  ·  "
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
-                            f"{_paydown_desc}"
+                            f"{_paydown_desc}{_rev_share_desc}"
                         )
                     elif dcf_mode == "Earnings":
                         _earn_base_eps = assumptions_updated.get("base_eps", 0)
@@ -2206,13 +2249,20 @@ elif active_tab == "Ticker Deep Dive":
                             f"  ·  Debt paydown: ${_fcf_paydown/1e6:.0f}M/yr → Net Debt@Y10: ${_fcf_nd_terminal/1e9:.2f}B"
                             if _fcf_paydown > 0 else ""
                         )
+                        _fcf_share_chg_disp = assumptions_updated.get("annual_share_change", 0)
+                        _fcf_share_desc = (
+                            f"  ·  Buyback: {_fcf_share_chg_disp:+.1f}%/yr → {assumptions_updated.get('terminal_shares', 0)/1e9:.2f}B shares@Y10"
+                            if _fcf_share_chg_disp < -0.05 else (
+                                f"  ·  Dilution: {_fcf_share_chg_disp:+.1f}%/yr" if _fcf_share_chg_disp > 0.05 else ""
+                            )
+                        )
                         st.caption(
                             f"Base FCF: ${base_fcf/1e9:.2f}B  ·  "
                             f"{growth_desc}  ·  "
                             f"WACC: {user_discount:.2f}%  ·  "
                             f"Terminal: {user_terminal:.2f}%  ·  "
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
-                            f"{_fcf_paydown_desc}"
+                            f"{_fcf_paydown_desc}{_fcf_share_desc}"
                         )
 
                     # --- Sensitivity table ---
@@ -2295,6 +2345,7 @@ elif active_tab == "Ticker Deep Dive":
                             discount_rate=user_discount / 100.0,
                             terminal_growth=user_terminal / 100.0,
                             annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else 0.0,
+                            annual_share_change=user_share_change / 100.0,
                         )
 
                         _rd_direction = _rd_result.get("direction")
@@ -2418,7 +2469,8 @@ elif active_tab == "Ticker Deep Dive":
                             net_debt=_rd_rev_net_debt or 0.0,
                             discount_rate=user_discount / 100.0,
                             terminal_growth=user_terminal / 100.0,
-                            annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else 0.0,
+                            annual_debt_paydown=user_debt_paydown_r * 1e6 if user_debt_paydown_r else 0.0,
+                            annual_share_change=user_share_change_r / 100.0,
                         )
 
                         _rrd_direction = _rrd_result.get("direction")
