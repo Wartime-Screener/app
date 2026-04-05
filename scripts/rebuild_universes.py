@@ -3,7 +3,7 @@
 Rebuild universe CSVs from FMP's company screener endpoint.
 
 Uses FMP's paid screener data (not Nasdaq) to ensure accuracy.
-Filters to US-listed stocks above a market cap minimum, excluding ETFs and funds.
+Filters to NYSE/NASDAQ/AMEX-listed stocks above a market cap minimum, excluding ETFs and funds.
 
 Usage:
     python scripts/rebuild_universes.py [--min-market-cap 500000000] [--dry-run]
@@ -25,11 +25,10 @@ DEFAULT_MIN_MARKET_CAP = 500_000_000  # $500M
 
 
 def fetch_screener(min_market_cap: int) -> list[dict]:
-    """Fetch all US stocks above market cap minimum from FMP screener."""
+    """Fetch all NYSE/NASDAQ/AMEX stocks above market cap minimum from FMP screener."""
     url = (
         f"https://financialmodelingprep.com/stable/company-screener"
         f"?marketCapMoreThan={min_market_cap}"
-        f"&country=US"
         f"&exchange=NYSE,NASDAQ,AMEX"
         f"&limit=10000"
         f"&apikey={FMP_API_KEY}"
@@ -145,7 +144,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing files")
     args = parser.parse_args()
 
-    print(f"Fetching US stocks with market cap > ${args.min_market_cap:,} from FMP...")
+    print(f"Fetching NYSE/NASDAQ/AMEX stocks with market cap > ${args.min_market_cap:,} from FMP...")
     stocks = fetch_screener(args.min_market_cap)
     print(f"Found {len(stocks)} stocks (ETFs/funds excluded)")
 

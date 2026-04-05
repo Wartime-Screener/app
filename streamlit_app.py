@@ -12,7 +12,7 @@ Port configured to 8502 via .streamlit/config.toml
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 try:
@@ -29,7 +29,7 @@ import streamlit as st
 from src.tradier_client import TradierClient
 from src.fmp_client import FMPClient
 from src.eia_client import EIAClient, PETROLEUM_SERIES, SPOT_PRICE_SERIES
-from src.fred_client import FREDClient, FRED_SERIES
+from src.fred_client import FREDClient, FRED_SERIES, ECON_CATEGORIES, format_econ_value
 from src.commodity_client import (
     COMMODITY_SYMBOLS, get_commodity_quote, get_commodity_quote_by_symbol,
     get_commodity_history, clear_cache as clear_commodity_cache
@@ -45,11 +45,16 @@ from src.edgar_client import EDGARClient
 from src.price_validator import cross_validate_price
 from src.universe_loader import list_universes, load_universe
 import src.portfolio as _portfolio_mod
+import src.watchlist as _watchlist_mod
 from src.portfolio import (
     load_portfolio, save_portfolio, add_position, remove_position,
     update_position_notes,
     get_all_tags, compute_position_performance, compute_portfolio_summary,
     compute_tag_performance, get_position_history, get_spy_benchmark,
+)
+from src.watchlist import (
+    load_watchlist, save_watchlist, add_to_watchlist,
+    remove_from_watchlist, update_watchlist_notes,
 )
 from streamlit_js_eval import streamlit_js_eval
 
@@ -349,6 +354,8 @@ _TAB_OPTIONS = [
     "Balance Sheet Health",
     "EIA Inventories",
     "Commodity Prices",
+    "Economic Indicators",
+    "Watchlist",
     "Portfolio Tracker",
     "Settings",
 ]
@@ -395,8 +402,8 @@ analyze a specific company.*"""
     )
     selected_universes = [uni_map[d] for d in selected_display]
 
-    filter_cols = st.columns(3)
-    with filter_cols[0]:
+    filter_row1 = st.columns(3)
+    with filter_row1[0]:
         history_years = st.selectbox(
             "History Window",
             options=[5, 10, 20],
@@ -405,7 +412,7 @@ analyze a specific company.*"""
             help="How many years of historical data to use for percentile rankings.",
             key="history_years",
         )
-    with filter_cols[1]:
+    with filter_row1[1]:
         max_pe = st.number_input(
             "Max P/E Ratio",
             min_value=0.0,
@@ -414,35 +421,81 @@ analyze a specific company.*"""
             step=5.0,
             help="Exclude tickers with P/E above this value.",
         )
+    with filter_row1[2]:
+        min_pe = st.number_input(
+            "Min P/E Ratio",
+            min_value=0.0,
+            max_value=500.0,
+            value=0.0,
+            step=5.0,
+            help="Exclude tickers with P/E below this value (filters out negative earners).",
+        )
 
-    # Scan button — centered
+    filter_row2 = st.columns(3)
+    with filter_row2[0]:
+        min_roe = st.number_input(
+            "Min ROE (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=1.0,
+            help="Only include tickers with ROE above this percentage.",
+        )
+    with filter_row2[1]:
+        max_de = st.number_input(
+            "Max Debt/Equity",
+            min_value=0.0,
+            max_value=10.0,
+            value=10.0,
+            step=0.5,
+            help="Exclude tickers with Debt/Equity above this value.",
+        )
+
+    # Scan button
     _left, _center, _right = st.columns([2, 1, 2])
-    col_export = _right  # export button goes on the right after results load
+    col_export = _right
     with _center:
         scan_clicked = st.button("Scan Selected Industries", type="primary", use_container_width=True)
 
     if scan_clicked:
         if not selected_universes:
             st.warning("Please select at least one industry to scan.")
+
+    if scan_clicked and selected_universes:
+        progress_bar = st.progress(0, text="Starting scan...")
+        stop_placeholder = st.empty()
+        st.session_state["_scan_cancelled"] = False
+
+        def update_progress(current, total, ticker):
+            pct = current / total
+            progress_bar.progress(pct, text=f"Analyzing {ticker} ({current}/{total})")
+
+        def check_cancel():
+            return st.session_state.get("_scan_cancelled", False)
+
+        with stop_placeholder.container():
+            if st.button("⏹ Stop Scan", type="secondary", use_container_width=True, key="stop_scan_btn"):
+                st.session_state["_scan_cancelled"] = True
+
+        results = scan_all_universes(
+            fmp_client=fmp,
+            tradier_client=tradier,
+            universe_names=selected_universes,
+            progress_callback=update_progress,
+            cancel_check=check_cancel,
+            history_years=history_years,
+        )
+
+        progress_bar.empty()
+        stop_placeholder.empty()
+
+        was_cancelled = st.session_state.pop("_scan_cancelled", False)
+        st.session_state["scan_results"] = results
+        if was_cancelled and len(results) > 0:
+            st.warning(f"Scan stopped early. {len(results)} tickers analyzed (partial results).")
+        elif was_cancelled:
+            st.warning("Scan cancelled before any results were collected.")
         else:
-            progress_bar = st.progress(0, text="Starting scan...")
-            status_text = st.empty()
-
-            def update_progress(current, total, ticker):
-                pct = current / total
-                progress_bar.progress(pct, text=f"Analyzing {ticker} ({current}/{total})")
-
-            with st.spinner("Scanning industries..."):
-                results = scan_all_universes(
-                    fmp_client=fmp,
-                    tradier_client=tradier,
-                    universe_names=selected_universes,
-                    progress_callback=update_progress,
-                    history_years=history_years,
-                )
-
-            progress_bar.empty()
-            st.session_state["scan_results"] = results
             st.success(f"Scan complete. {len(results)} tickers analyzed.")
 
     # Display results
@@ -453,6 +506,12 @@ analyze a specific company.*"""
         filters = {}
         if max_pe < 500:
             filters["max_pe"] = max_pe
+        if min_pe > 0:
+            filters["min_pe"] = min_pe
+        if min_roe > 0:
+            filters["min_roe"] = min_roe / 100.0  # UI shows %, backend expects decimal
+        if max_de < 10:
+            filters["max_debt_to_equity"] = max_de
 
         if filters:
             results_df = apply_filters(results_df, filters)
@@ -815,7 +874,8 @@ elif active_tab == "Ticker Deep Dive":
                 "ev_revenue": "EV/Revenue", "fcf_yield": "FCF Yield",
                 "roe": "ROE", "roa": "ROA",
                 "gross_margin": "Gross Margin", "operating_margin": "Operating Margin",
-                "net_margin": "Net Margin", "debt_to_equity": "Debt/Equity",
+                "net_margin": "Net Margin", "operating_ratio": "Operating Ratio",
+                "debt_to_equity": "Debt/Equity",
                 "current_ratio": "Current Ratio", "quick_ratio": "Quick Ratio",
                 "interest_coverage": "Interest Coverage",
                 "earnings_yield": "Earnings Yield",
@@ -843,7 +903,7 @@ elif active_tab == "Ticker Deep Dive":
                 "gross_margin", "operating_margin", "net_margin",
                 "roe", "roa", "roic",
                 "fcf_yield", "earnings_yield",
-                "debt_to_assets",
+                "operating_ratio", "debt_to_assets",
                 "revenue_growth_yoy", "earnings_growth_yoy", "fcf_growth_yoy",
             }
 
@@ -1758,7 +1818,7 @@ elif active_tab == "Ticker Deep Dive":
                             )
                             user_debt_paydown = st.number_input(
                                 "Annual Debt Paydown ($M)",
-                                min_value=-2000.0, max_value=2000.0,
+                                min_value=-20000.0, max_value=20000.0,
                                 value=float(_paydown_default),
                                 step=10.0, format="%.0f",
                                 key="dcf_debt_paydown",
@@ -1932,7 +1992,7 @@ elif active_tab == "Ticker Deep Dive":
                                 _paydown_default_r = round((_auto_paydown_r or 0) / 1e6, 1)
                                 user_debt_paydown_r = st.number_input(
                                     "Annual Debt Paydown ($M)",
-                                    min_value=-2000.0, max_value=2000.0,
+                                    min_value=-20000.0, max_value=20000.0,
                                     value=float(_paydown_default_r),
                                     step=10.0, format="%.0f",
                                     key="dcf_rev_debt_paydown",
@@ -3566,11 +3626,12 @@ elif active_tab == "Commodity Prices":
             ag_all_options[k] = {"label": v["label"], "units": v["units"], "source": "yfinance"}
         if fred.is_configured:
             for k, v in FRED_SERIES.items():
-                ag_all_options[k] = {"label": v["label"], "units": v["units"], "source": "fred"}
+                if v.get("category") == "commodity":
+                    ag_all_options[k] = {"label": v["label"], "units": v["units"], "source": "fred"}
 
         # Current prices — yfinance commodities + FRED series (two rows of 4)
         all_ag_items = list(ag_commodities.items())
-        fred_items = list(FRED_SERIES.items()) if fred.is_configured else []
+        fred_items = [(k, v) for k, v in FRED_SERIES.items() if v.get("category") == "commodity"] if fred.is_configured else []
 
         # First row
         row1_cols = st.columns(4)
@@ -3681,7 +3742,584 @@ elif active_tab == "Commodity Prices":
             st.plotly_chart(fig, use_container_width=True)
 
 # ------------------------------------------------------------------ #
-# Tab 7 — Portfolio Tracker
+# Tab 7 — Economic Indicators
+# ------------------------------------------------------------------ #
+elif active_tab == "Economic Indicators":
+    st.header("Economic Indicators")
+    st.write("Fresh releases from FRED — labor market, activity, inflation, GDP, and interest rates.")
+
+    if not fred.is_configured:
+        st.error("FRED API key is required. Set FRED_API_KEY environment variable.")
+    else:
+        econ_period = st.selectbox(
+            "History",
+            options=["1y", "2y", "5y", "10y"],
+            index=1,
+            format_func=lambda p: {"1y": "1 Year", "2y": "2 Years", "5y": "5 Years", "10y": "10 Years"}[p],
+            key="econ_period",
+        )
+
+        econ_tabs = st.tabs(list(ECON_CATEGORIES.keys()))
+
+        def _render_econ_subtab(tab, category_name: str, series_keys: list[str], period: str):
+            """Render metric cards, chart, and data table for a group of FRED series."""
+            with tab:
+                # Fetch all series data up front
+                all_data = {}
+                with st.spinner(f"Loading {category_name}..."):
+                    for key in series_keys:
+                        all_data[key] = fred.get_series(key, period)
+
+                # --- Metric cards: rows of 4 ---
+                for row_start in range(0, len(series_keys), 4):
+                    row_keys = series_keys[row_start:row_start + 4]
+                    cols = st.columns(4)
+                    for idx, key in enumerate(row_keys):
+                        with cols[idx]:
+                            info = FRED_SERIES[key]
+                            data = all_data.get(key, [])
+                            if data and len(data) >= 1:
+                                latest_val = data[0]["value"]
+                                latest_date = data[0]["period"]
+
+                                # For inflation indices, show YoY % change as the delta
+                                if info.get("category") == "inflation" and info["units"] == "Index":
+                                    # Find observation ~12 months ago
+                                    yoy_pct = None
+                                    for obs in data:
+                                        obs_date = datetime.strptime(obs["period"], "%Y-%m-%d")
+                                        latest_dt = datetime.strptime(latest_date, "%Y-%m-%d")
+                                        months_ago = (latest_dt.year - obs_date.year) * 12 + (latest_dt.month - obs_date.month)
+                                        if months_ago >= 11:
+                                            yoy_pct = ((latest_val - obs["value"]) / obs["value"]) * 100
+                                            break
+                                    delta_str = f"YoY: {yoy_pct:+.1f}%" if yoy_pct is not None else None
+                                elif len(data) >= 2:
+                                    prev_val = data[1]["value"]
+                                    change = latest_val - prev_val
+                                    if info["units"] == "%":
+                                        delta_str = f"{change:+.2f}pp"
+                                    elif abs(latest_val) > 0:
+                                        change_pct = (change / abs(prev_val)) * 100 if prev_val != 0 else 0
+                                        delta_str = f"{change:+,.0f} ({change_pct:+.1f}%)" if abs(latest_val) >= 10 else f"{change:+.2f}"
+                                    else:
+                                        delta_str = f"{change:+.2f}"
+                                else:
+                                    delta_str = None
+
+                                st.metric(
+                                    label=info["label"],
+                                    value=format_econ_value(latest_val, info["units"]),
+                                    delta=delta_str,
+                                    delta_color="inverse" if key in (
+                                        "unemployment_rate", "initial_claims",
+                                    ) else "normal",
+                                    help=f"As of {latest_date} | {info['series_id']}",
+                                )
+                            else:
+                                st.metric(label=info["label"], value="N/A")
+
+                st.divider()
+
+                # --- Special: Yield curve snapshot for Rates ---
+                if category_name == "Rates & Money":
+                    yc_keys = ["treasury_2y", "treasury_10y", "treasury_30y"]
+                    yc_labels = ["2Y", "10Y", "30Y"]
+                    yc_vals = []
+                    for yk in yc_keys:
+                        d = all_data.get(yk, [])
+                        yc_vals.append(d[0]["value"] if d else None)
+
+                    if all(v is not None for v in yc_vals):
+                        st.subheader("Yield Curve Snapshot")
+                        yc_fig = go.Figure()
+                        yc_fig.add_trace(go.Scatter(
+                            x=yc_labels, y=yc_vals,
+                            mode="lines+markers+text",
+                            text=[f"{v:.2f}%" for v in yc_vals],
+                            textposition="top center",
+                            line=dict(color="#1f77b4", width=3),
+                            marker=dict(size=10),
+                        ))
+                        yc_fig.update_layout(
+                            template="plotly_dark", height=300,
+                            yaxis_title="Yield (%)",
+                            xaxis_title="Maturity",
+                            showlegend=False,
+                            margin=dict(t=30),
+                        )
+                        st.plotly_chart(yc_fig, use_container_width=True)
+
+                # --- Charts ---
+                st.subheader("Historical Trends")
+
+                # Group series by units to handle multi-axis
+                units_groups = {}
+                for key in series_keys:
+                    data = all_data.get(key, [])
+                    if not data:
+                        continue
+                    u = FRED_SERIES[key]["units"]
+                    if u not in units_groups:
+                        units_groups[u] = []
+                    units_groups[u].append(key)
+
+                # If GDP category, use bar chart for growth rate
+                if category_name == "GDP" and "real_gdp_growth" in all_data and all_data["real_gdp_growth"]:
+                    gdp_growth_data = all_data["real_gdp_growth"]
+                    dates = [d["period"] for d in reversed(gdp_growth_data)]
+                    values = [d["value"] for d in reversed(gdp_growth_data)]
+                    colors = ["#2ca02c" if v >= 0 else "#d62728" for v in values]
+
+                    fig_gdp = go.Figure()
+                    fig_gdp.add_trace(go.Bar(
+                        x=dates, y=values,
+                        marker_color=colors,
+                        name="Real GDP Growth",
+                    ))
+                    fig_gdp.add_hline(y=0, line_dash="dash", line_color="gray")
+                    fig_gdp.update_layout(
+                        title="Real GDP Growth (QoQ Annualized, %)",
+                        template="plotly_dark", height=450,
+                        xaxis_title="Date", yaxis_title="%",
+                    )
+                    st.plotly_chart(fig_gdp, use_container_width=True)
+
+                    # Show Real GDP level chart separately
+                    if "real_gdp" in all_data and all_data["real_gdp"]:
+                        rgdp_data = all_data["real_gdp"]
+                        fig_rgdp = go.Figure()
+                        fig_rgdp.add_trace(go.Scatter(
+                            x=[d["period"] for d in reversed(rgdp_data)],
+                            y=[d["value"] for d in reversed(rgdp_data)],
+                            mode="lines", name="Real GDP",
+                            line=dict(color="#1f77b4", width=2),
+                        ))
+                        fig_rgdp.update_layout(
+                            title="Real GDP ($B, chained 2017)",
+                            template="plotly_dark", height=400,
+                            xaxis_title="Date", yaxis_title="$B",
+                        )
+                        st.plotly_chart(fig_rgdp, use_container_width=True)
+
+                elif category_name == "Rates & Money":
+                    # Separate charts: yields together, spread separate, M2 separate
+                    yield_keys = [k for k in series_keys if k.startswith("treasury_") or k == "fed_funds"]
+                    fig_yields = go.Figure()
+                    _colors = ["#ff7f0e", "#1f77b4", "#2ca02c", "#d62728"]
+                    for ci, key in enumerate(yield_keys):
+                        data = all_data.get(key, [])
+                        if not data:
+                            continue
+                        fig_yields.add_trace(go.Scatter(
+                            x=[d["period"] for d in reversed(data)],
+                            y=[d["value"] for d in reversed(data)],
+                            mode="lines", name=FRED_SERIES[key]["label"],
+                            line=dict(color=_colors[ci % len(_colors)], width=2),
+                        ))
+                    fig_yields.update_layout(
+                        title="Interest Rates (%)",
+                        template="plotly_dark", height=450,
+                        xaxis_title="Date", yaxis_title="%",
+                        hovermode="x unified",
+                        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                    )
+                    st.plotly_chart(fig_yields, use_container_width=True)
+
+                    # 10Y-2Y spread with recession shading
+                    spread_data = all_data.get("yield_spread_10y2y", [])
+                    if spread_data:
+                        fig_spread = go.Figure()
+                        dates_s = [d["period"] for d in reversed(spread_data)]
+                        vals_s = [d["value"] for d in reversed(spread_data)]
+                        fig_spread.add_trace(go.Scatter(
+                            x=dates_s, y=vals_s,
+                            mode="lines", name="10Y-2Y Spread",
+                            line=dict(color="#1f77b4", width=2),
+                            fill="tozeroy",
+                            fillcolor="rgba(214, 39, 40, 0.15)",
+                        ))
+                        fig_spread.add_hline(y=0, line_dash="dash", line_color="red", line_width=2,
+                                             annotation_text="Inversion")
+                        fig_spread.update_layout(
+                            title="10Y-2Y Treasury Spread (Recession Indicator)",
+                            template="plotly_dark", height=400,
+                            xaxis_title="Date", yaxis_title="Spread (%)",
+                        )
+                        st.plotly_chart(fig_spread, use_container_width=True)
+
+                    # M2
+                    m2_data = all_data.get("m2_money_supply", [])
+                    if m2_data:
+                        fig_m2 = go.Figure()
+                        fig_m2.add_trace(go.Scatter(
+                            x=[d["period"] for d in reversed(m2_data)],
+                            y=[d["value"] for d in reversed(m2_data)],
+                            mode="lines", name="M2",
+                            line=dict(color="#2ca02c", width=2),
+                        ))
+                        fig_m2.update_layout(
+                            title="M2 Money Supply ($B)",
+                            template="plotly_dark", height=400,
+                            xaxis_title="Date", yaxis_title="$B",
+                        )
+                        st.plotly_chart(fig_m2, use_container_width=True)
+
+                else:
+                    # Default: one chart per distinct unit group, or all together if same units
+                    distinct_units = list(units_groups.keys())
+
+                    if not distinct_units:
+                        st.warning(f"No data available for {category_name}. Try refreshing or check API connectivity.")
+                    elif len(distinct_units) <= 2:
+                        fig = go.Figure()
+                        _chart_colors = [
+                            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                            "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
+                        ]
+                        use_secondary = len(distinct_units) == 2
+                        primary_unit = distinct_units[0]
+
+                        for ci, key in enumerate(series_keys):
+                            data = all_data.get(key, [])
+                            if not data:
+                                continue
+                            info = FRED_SERIES[key]
+                            on_secondary = use_secondary and info["units"] != primary_unit
+
+                            fig.add_trace(go.Scatter(
+                                x=[d["period"] for d in reversed(data)],
+                                y=[d["value"] for d in reversed(data)],
+                                mode="lines", name=info["label"],
+                                line=dict(color=_chart_colors[ci % len(_chart_colors)], width=2),
+                                yaxis="y2" if on_secondary else "y",
+                            ))
+
+                        layout_kwargs = dict(
+                            title=category_name,
+                            template="plotly_dark", height=500,
+                            xaxis_title="Date",
+                            yaxis_title=primary_unit,
+                            hovermode="x unified",
+                            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                        )
+                        if use_secondary:
+                            layout_kwargs["yaxis2"] = dict(
+                                title=distinct_units[1], overlaying="y", side="right",
+                            )
+                        fig.update_layout(**layout_kwargs)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        # Too many unit types — separate chart per series
+                        for key in series_keys:
+                            data = all_data.get(key, [])
+                            if not data:
+                                continue
+                            info = FRED_SERIES[key]
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=[d["period"] for d in reversed(data)],
+                                y=[d["value"] for d in reversed(data)],
+                                mode="lines", name=info["label"],
+                                line=dict(color="#1f77b4", width=2),
+                            ))
+                            fig.update_layout(
+                                title=f"{info['label']} ({info['units']})",
+                                template="plotly_dark", height=350,
+                                xaxis_title="Date", yaxis_title=info["units"],
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+
+                # --- Data tables in expander ---
+                with st.expander("Raw Data"):
+                    for key in series_keys:
+                        data = all_data.get(key, [])
+                        if not data:
+                            continue
+                        info = FRED_SERIES[key]
+                        st.caption(f"{info['label']} ({info['series_id']})")
+                        df = pd.DataFrame(data[:24])  # Last 24 observations
+                        if not df.empty:
+                            df["value"] = df["value"].apply(lambda v: format_econ_value(v, info["units"]))
+                            df = df.rename(columns={"period": "Date", "value": info["units"]})
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        for tab_obj, (cat_name, cat_keys) in zip(econ_tabs, ECON_CATEGORIES.items()):
+            _render_econ_subtab(tab_obj, cat_name, cat_keys, econ_period)
+
+
+# ------------------------------------------------------------------ #
+# Tab 8 — Watchlist
+# ------------------------------------------------------------------ #
+elif active_tab == "Watchlist":
+    st.header("Watchlist")
+    st.caption("Track stocks you're watching — click a row to jump to Ticker Deep Dive.")
+
+    watchlist_data = load_watchlist()
+    wl_items = watchlist_data.get("items", [])
+
+    # ---- Add to Watchlist form ---- #
+    with st.expander("➕ Add to Watchlist", expanded=len(wl_items) == 0):
+        with st.form(key="add_watchlist_form", clear_on_submit=True):
+            wl_col1, wl_col2 = st.columns([1, 3])
+            with wl_col1:
+                wl_ticker = st.text_input("Ticker", placeholder="e.g. EXPO")
+            with wl_col2:
+                wl_reason = st.text_input("Reason / Thesis", placeholder="e.g. Waiting for pullback, AI tailwind")
+            wl_submit = st.form_submit_button("Add to Watchlist", type="primary", use_container_width=True)
+
+        if wl_submit and wl_ticker.strip():
+            # Fetch current price to store as price_at_add
+            _add_price = None
+            try:
+                _add_df = tradier.get_quotes([wl_ticker.strip().upper()])
+                if _add_df is not None and not _add_df.empty:
+                    _add_price = float(_add_df.iloc[0]["last"])
+            except Exception:
+                pass
+            new_item = add_to_watchlist(wl_ticker, wl_reason, price_at_add=_add_price)
+            price_msg = f" at ${_add_price:,.2f}" if _add_price else ""
+            st.success(f"Added {new_item['ticker']}{price_msg} to watchlist.")
+            st.rerun()
+
+    # ---- Watchlist table with live prices ---- #
+    if wl_items:
+        # Fetch current prices for all watchlist tickers
+        wl_tickers = list({item["ticker"] for item in wl_items})
+        wl_quotes = {}
+        try:
+            _wl_df = tradier.get_quotes(wl_tickers)
+            if _wl_df is not None and not _wl_df.empty:
+                for _, row in _wl_df.iterrows():
+                    sym = str(row.get("symbol", ""))
+                    wl_quotes[sym] = {
+                        "price": float(row["last"]) if pd.notna(row.get("last")) else None,
+                        "change": float(row["change"]) if pd.notna(row.get("change")) else None,
+                        "change_pct": float(row["change_percentage"]) if pd.notna(row.get("change_percentage")) else None,
+                    }
+        except Exception:
+            pass
+
+        # Build display DataFrame
+        wl_rows = []
+        for item in wl_items:
+            ticker = item["ticker"]
+            quote = wl_quotes.get(ticker, {})
+            price = quote.get("price", None)
+            change = quote.get("change", None)
+            change_pct = quote.get("change_pct", None)
+
+            added = item.get("added_date", "")
+            try:
+                days_watching = (date.today() - datetime.strptime(added, "%Y-%m-%d").date()).days
+            except (ValueError, TypeError):
+                days_watching = 0
+
+            price_at_add = item.get("price_at_add")
+            if price and price_at_add:
+                since_added_pct = ((price - price_at_add) / price_at_add) * 100
+                since_added_str = f"{since_added_pct:+.1f}%"
+            else:
+                since_added_str = "—"
+
+            wl_rows.append({
+                "Ticker": ticker,
+                "Price": f"${price:,.2f}" if price else "N/A",
+                "Change": f"{change:+.2f}" if change is not None else "—",
+                "Change %": f"{change_pct:+.2f}%" if change_pct is not None else "—",
+                "Added Price": f"${price_at_add:,.2f}" if price_at_add else "—",
+                "Since Added": since_added_str,
+                "Reason": item.get("reason", ""),
+                "Added": added,
+                "Days": days_watching,
+            })
+
+        wl_df = pd.DataFrame(wl_rows)
+
+        event = st.dataframe(
+            wl_df,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="watchlist_table",
+            hide_index=True,
+        )
+
+        # Handle row click → jump to Ticker Deep Dive
+        if event and event.selection and event.selection.rows:
+            clicked_row = event.selection.rows[0]
+            clicked_ticker = wl_df.iloc[clicked_row]["Ticker"]
+            st.session_state["jump_to_ticker"] = clicked_ticker
+            st.session_state["pending_tab"] = "Ticker Deep Dive"
+            st.rerun()
+
+        # ---- Remove from Watchlist ---- #
+        with st.expander("Remove from Watchlist"):
+            remove_options = [f"{item['ticker']} — {item.get('reason', '')[:40]}" for item in wl_items]
+            wl_remove_selection = st.selectbox("Select ticker to remove", remove_options, key="wl_remove_select")
+            if st.button("Remove", key="wl_remove_btn", type="secondary"):
+                remove_idx = remove_options.index(wl_remove_selection)
+                remove_id = wl_items[remove_idx]["id"]
+                if remove_from_watchlist(remove_id):
+                    st.success(f"Removed from watchlist.")
+                    st.rerun()
+
+        st.divider()
+
+        # ---- Research Notes (same pattern as portfolio) ---- #
+        @st.fragment
+        def _watchlist_notes_fragment():
+            st.subheader("📝 Research Notes")
+
+            _fresh_items = load_watchlist().get("items", [])
+            if not _fresh_items:
+                st.info("No watchlist items yet.")
+                return
+
+            note_options = [f"{item['ticker']} — {item.get('reason', '')[:50]}" for item in _fresh_items]
+            note_selection = st.selectbox("Select ticker", note_options, key="wl_note_select")
+            note_idx = note_options.index(note_selection)
+            note_item = _fresh_items[note_idx]
+
+            # Get existing notes (migrate from old string format if needed)
+            existing_notes = note_item.get("notes", "")
+            if isinstance(existing_notes, str):
+                if existing_notes.strip():
+                    structured_notes = [{"text": existing_notes, "level": 0}]
+                else:
+                    structured_notes = []
+            else:
+                structured_notes = existing_notes if existing_notes else []
+
+            # Display existing notes with per-line edit and delete buttons
+            if structured_notes:
+                _del_counters = {0: 0, 1: 0, 2: 0}
+                _display_lines = []
+                for idx, item in enumerate(structured_notes):
+                    lvl = item.get("level", 0)
+                    txt = item.get("text", "")
+                    if not txt.strip():
+                        continue
+                    for l in range(lvl + 1, 3):
+                        _del_counters[l] = 0
+                    indent = "&nbsp;" * (8 * lvl)
+                    if lvl == 0:
+                        marker = "•"
+                    elif lvl == 1:
+                        c = _del_counters[1] % 26
+                        marker = f"{chr(97 + c)})"
+                        _del_counters[1] += 1
+                    else:
+                        c = _del_counters[2] % 26
+                        marker = f"{chr(97 + c)}{chr(97 + c)})"
+                        _del_counters[2] += 1
+                    _display_lines.append((idx, lvl, txt, f"{indent}{marker} {txt}"))
+
+                # Handle pending delete
+                _del_key = st.session_state.get("_wl_note_to_delete", None)
+                if _del_key is not None:
+                    st.session_state.pop("_wl_note_to_delete", None)
+                    if 0 <= _del_key < len(structured_notes):
+                        del structured_notes[_del_key]
+                        update_watchlist_notes(note_item["id"], structured_notes)
+                        st.rerun()
+
+                _edit_state_key = f"_wl_note_editing_{note_item['id']}"
+                _editing_idx = st.session_state.get(_edit_state_key, None)
+
+                for note_idx_display, (orig_idx, lvl, txt, line_html) in enumerate(_display_lines):
+                    if _editing_idx == orig_idx:
+                        prefix = ("~~" if lvl == 2 else "~" if lvl == 1 else "")
+                        ecol1, ecol2, ecol3 = st.columns([18, 1, 1])
+                        with ecol1:
+                            edited_text = st.text_input(
+                                "Edit note",
+                                value=f"{prefix}{txt}",
+                                key=f"wl_editinput_{note_item['id']}_{orig_idx}",
+                                label_visibility="collapsed",
+                            )
+                        with ecol2:
+                            if st.button("✓", key=f"wl_savenote_{note_item['id']}_{orig_idx}",
+                                         help="Save edit"):
+                                new_text = edited_text.strip()
+                                if new_text:
+                                    if new_text.startswith("~~"):
+                                        new_lvl, new_text = 2, new_text[2:].lstrip()
+                                    elif new_text.startswith("~"):
+                                        new_lvl, new_text = 1, new_text[1:].lstrip()
+                                    else:
+                                        new_lvl = 0
+                                    structured_notes[orig_idx] = {"text": new_text.strip(), "level": new_lvl}
+                                    update_watchlist_notes(note_item["id"], structured_notes)
+                                st.session_state.pop(_edit_state_key, None)
+                                st.rerun()
+                        with ecol3:
+                            if st.button("✕", key=f"wl_canceledit_{note_item['id']}_{orig_idx}",
+                                         help="Cancel edit"):
+                                st.session_state.pop(_edit_state_key, None)
+                                st.rerun()
+                    else:
+                        dcol1, dcol2, dcol3 = st.columns([18, 1, 1])
+                        with dcol1:
+                            st.markdown(line_html, unsafe_allow_html=True)
+                        with dcol2:
+                            if st.button("✎", key=f"wl_editnote_{note_item['id']}_{note_idx_display}",
+                                         help="Edit this note"):
+                                st.session_state[_edit_state_key] = orig_idx
+                                st.rerun()
+                        with dcol3:
+                            if st.button("✕", key=f"wl_delnote_{note_item['id']}_{note_idx_display}",
+                                         help="Delete this note"):
+                                st.session_state["_wl_note_to_delete"] = orig_idx
+                                st.rerun()
+
+            st.caption("Start a line with **~** to indent (a, b, c) or **~~** to double-indent (aa, bb, cc). "
+                       "Each line becomes a separate note.")
+
+            with st.form(key="wl_add_note_form", clear_on_submit=True):
+                new_note_text = st.text_area(
+                    "Note",
+                    height=150,
+                    placeholder="Type your thoughts here...\n~supporting detail\n~~sub-detail\n\nEach line saves as a separate note.",
+                    key="wl_note_text_input",
+                    label_visibility="collapsed",
+                )
+                save_note = st.form_submit_button("💾 Save Notes", use_container_width=True)
+
+            if save_note and new_note_text.strip():
+                new_entries = []
+                for line in new_note_text.split("\n"):
+                    if not line.strip():
+                        continue
+                    text = line
+                    if text.startswith("~~"):
+                        level = 2
+                        text = text[2:].lstrip()
+                    elif text.startswith("~"):
+                        level = 1
+                        text = text[1:].lstrip()
+                    else:
+                        level = 0
+                    if text.strip():
+                        new_entries.append({"text": text.strip(), "level": level})
+                if new_entries:
+                    updated_notes = structured_notes + new_entries
+                    update_watchlist_notes(note_item["id"], updated_notes)
+                    st.rerun()
+
+            if structured_notes:
+                if st.button("🗑️ Clear all notes", key="wl_clear_notes_btn"):
+                    update_watchlist_notes(note_item["id"], [])
+                    st.rerun()
+
+        _watchlist_notes_fragment()
+
+    else:
+        st.info("Your watchlist is empty. Add tickers above to start tracking.")
+
+
+# ------------------------------------------------------------------ #
+# Tab 9 — Portfolio Tracker
 # ------------------------------------------------------------------ #
 elif active_tab == "Portfolio Tracker":
     st.header("Portfolio Tracker")

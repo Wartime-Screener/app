@@ -2,7 +2,8 @@
 FRED (Federal Reserve Economic Data) API client.
 
 Provides access to economic data series from the St. Louis Fed.
-Currently used for egg prices (APU0000708111) but extensible to any FRED series.
+Covers labor market, activity/leading indicators, inflation, GDP,
+interest rates, and commodity prices.
 
 Env var: FRED_API_KEY (free key from https://fred.stlouisfed.org/docs/api/api_key.html)
 """
@@ -24,17 +25,272 @@ CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "fred"
 
 
 # FRED series definitions — add new series here as needed
+# category field controls which tab/section displays the series
 FRED_SERIES = {
+    # --- Commodity (displayed in Commodity Prices tab) ---
     "eggs": {
         "series_id": "APU0000708111",
         "label": "Eggs (Grade A Large)",
         "units": "$/dozen",
+        "category": "commodity",
+    },
+
+    # --- Labor Market ---
+    "unemployment_rate": {
+        "series_id": "UNRATE",
+        "label": "Unemployment Rate",
+        "units": "%",
+        "category": "labor",
+    },
+    "initial_claims": {
+        "series_id": "ICSA",
+        "label": "Initial Jobless Claims",
+        "units": "Thousands",
+        "category": "labor",
+    },
+    "nonfarm_payrolls": {
+        "series_id": "PAYEMS",
+        "label": "Nonfarm Payrolls",
+        "units": "Thousands",
+        "category": "labor",
+    },
+    "job_openings": {
+        "series_id": "JTSJOL",
+        "label": "Job Openings (JOLTS)",
+        "units": "Thousands",
+        "category": "labor",
+    },
+    "quits_rate": {
+        "series_id": "JTSQUR",
+        "label": "Quits Rate",
+        "units": "%",
+        "category": "labor",
+    },
+    "agg_weekly_hours": {
+        "series_id": "AWHI",
+        "label": "Aggregate Weekly Hours (Goods)",
+        "units": "Index",
+        "category": "labor",
+    },
+    "kc_fed_labor_momentum": {
+        "series_id": "FRBKCLMCIM",
+        "label": "KC Fed Labor (Momentum)",
+        "units": "Index",
+        "category": "labor",
+    },
+    "kc_fed_labor_activity": {
+        "series_id": "FRBKCLMCILA",
+        "label": "KC Fed Labor (Activity)",
+        "units": "Index",
+        "category": "labor",
+    },
+    "continued_claims": {
+        "series_id": "CCSA",
+        "label": "Continued Jobless Claims",
+        "units": "Thousands",
+        "category": "labor",
+    },
+
+    # --- Activity & Leading ---
+    "industrial_production": {
+        "series_id": "INDPRO",
+        "label": "Industrial Production",
+        "units": "Index",
+        "category": "activity",
+    },
+    "retail_sales": {
+        "series_id": "RSAFS",
+        "label": "Retail Sales",
+        "units": "$M",
+        "category": "activity",
+    },
+    "housing_starts": {
+        "series_id": "HOUST",
+        "label": "Housing Starts",
+        "units": "Thousands",
+        "category": "activity",
+    },
+    "building_permits": {
+        "series_id": "PERMIT",
+        "label": "Building Permits",
+        "units": "Thousands",
+        "category": "activity",
+    },
+    "consumer_sentiment": {
+        "series_id": "UMCSENT",
+        "label": "Consumer Sentiment",
+        "units": "Index",
+        "category": "activity",
+    },
+    "mfg_employment": {
+        "series_id": "MANEMP",
+        "label": "Manufacturing Employment",
+        "units": "Thousands",
+        "category": "activity",
+    },
+    "cfnai": {
+        "series_id": "CFNAI",
+        "label": "Chicago Fed National Activity",
+        "units": "Index",
+        "category": "activity",
+    },
+    "truck_tonnage": {
+        "series_id": "TRUCKD11",
+        "label": "ATA Truck Tonnage",
+        "units": "Index",
+        "category": "activity",
+    },
+    "freight_index": {
+        "series_id": "TSIFRGHT",
+        "label": "Freight Transportation Services",
+        "units": "Index",
+        "category": "activity",
+    },
+    "vix": {
+        "series_id": "VIXCLS",
+        "label": "CBOE VIX",
+        "units": "Index",
+        "category": "activity",
+    },
+    "nfci": {
+        "series_id": "NFCI",
+        "label": "Chicago Fed Financial Conditions",
+        "units": "Index",
+        "category": "activity",
+    },
+
+    # --- Inflation ---
+    "cpi": {
+        "series_id": "CPIAUCSL",
+        "label": "CPI (All Urban)",
+        "units": "Index",
+        "category": "inflation",
+    },
+    "core_cpi": {
+        "series_id": "CPILFESL",
+        "label": "Core CPI",
+        "units": "Index",
+        "category": "inflation",
+    },
+    "pce": {
+        "series_id": "PCEPI",
+        "label": "PCE Price Index",
+        "units": "Index",
+        "category": "inflation",
+    },
+    "core_pce": {
+        "series_id": "PCEPILFE",
+        "label": "Core PCE",
+        "units": "Index",
+        "category": "inflation",
+    },
+    "ppi": {
+        "series_id": "PPIACO",
+        "label": "PPI (All Commodities)",
+        "units": "Index",
+        "category": "inflation",
+    },
+
+    # --- GDP ---
+    "real_gdp": {
+        "series_id": "GDPC1",
+        "label": "Real GDP",
+        "units": "$B (2017)",
+        "category": "gdp",
+    },
+    "real_gdp_growth": {
+        "series_id": "A191RL1Q225SBEA",
+        "label": "Real GDP Growth (QoQ Ann.)",
+        "units": "%",
+        "category": "gdp",
+    },
+
+    # --- Rates & Money ---
+    "fed_funds": {
+        "series_id": "FEDFUNDS",
+        "label": "Fed Funds Rate",
+        "units": "%",
+        "category": "rates",
+    },
+    "treasury_2y": {
+        "series_id": "DGS2",
+        "label": "2-Year Treasury",
+        "units": "%",
+        "category": "rates",
     },
     "treasury_10y": {
         "series_id": "DGS10",
-        "label": "10-Year Treasury Yield",
+        "label": "10-Year Treasury",
         "units": "%",
+        "category": "rates",
     },
+    "treasury_30y": {
+        "series_id": "DGS30",
+        "label": "30-Year Treasury",
+        "units": "%",
+        "category": "rates",
+    },
+    "yield_spread_10y2y": {
+        "series_id": "T10Y2Y",
+        "label": "10Y-2Y Spread",
+        "units": "%",
+        "category": "rates",
+    },
+    "m2_money_supply": {
+        "series_id": "M2SL",
+        "label": "M2 Money Supply",
+        "units": "$B",
+        "category": "rates",
+    },
+
+    # --- Credit & Lending ---
+    "aaa_bond_yield": {
+        "series_id": "AAA",
+        "label": "Moody's Aaa Corporate Bond Yield",
+        "units": "%",
+        "category": "credit",
+    },
+    "hy_oas": {
+        "series_id": "BAMLH0A0HYM2",
+        "label": "High Yield OAS",
+        "units": "%",
+        "category": "credit",
+    },
+    "ig_oas": {
+        "series_id": "BAMLC0A0CM",
+        "label": "Investment Grade OAS",
+        "units": "%",
+        "category": "credit",
+    },
+    "mortgage_30y": {
+        "series_id": "MORTGAGE30US",
+        "label": "30-Year Mortgage Rate",
+        "units": "%",
+        "category": "credit",
+    },
+}
+
+# Groupings for the Economic Indicators tab
+ECON_CATEGORIES = {
+    "Labor Market": [
+        "unemployment_rate", "initial_claims", "continued_claims", "nonfarm_payrolls",
+        "job_openings", "quits_rate", "agg_weekly_hours",
+        "kc_fed_labor_momentum", "kc_fed_labor_activity",
+    ],
+    "Activity & Leading": [
+        "industrial_production", "retail_sales", "housing_starts", "building_permits",
+        "consumer_sentiment", "mfg_employment", "cfnai", "truck_tonnage", "freight_index",
+        "vix", "nfci",
+    ],
+    "Inflation": ["cpi", "core_cpi", "pce", "core_pce", "ppi"],
+    "GDP": ["real_gdp", "real_gdp_growth"],
+    "Credit & Lending": [
+        "aaa_bond_yield", "hy_oas", "ig_oas", "mortgage_30y",
+    ],
+    "Rates & Money": [
+        "fed_funds", "treasury_2y", "treasury_10y", "treasury_30y",
+        "yield_spread_10y2y", "m2_money_supply",
+    ],
 }
 
 # Map period strings to approximate number of months to fetch
@@ -48,6 +304,24 @@ PERIOD_TO_MONTHS = {
     "10y": 120,
     "max": 600,
 }
+
+
+def format_econ_value(value: float, units: str) -> str:
+    """Format a value based on its units for display."""
+    if value is None:
+        return "N/A"
+    if units == "%":
+        return f"{value:.2f}%"
+    elif units in ("$M", "$B", "$B (2017)"):
+        return f"{value:,.0f}"
+    elif units == "$/dozen":
+        return f"${value:.2f}"
+    elif units == "Thousands":
+        return f"{value:,.0f}"
+    elif units == "Index":
+        return f"{value:.1f}"
+    else:
+        return f"{value:,.2f}"
 
 
 class FREDClient:
@@ -135,44 +409,54 @@ class FREDClient:
         months = PERIOD_TO_MONTHS.get(period, 12)
         start_date = (datetime.now() - timedelta(days=months * 31)).strftime("%Y-%m-%d")
 
-        self._rate_limit()
+        max_retries = 3
+        for attempt in range(max_retries):
+            self._rate_limit()
 
-        try:
-            resp = requests.get(
-                self.BASE_URL,
-                params={
-                    "series_id": series_def["series_id"],
-                    "api_key": self.api_key,
-                    "file_type": "json",
-                    "observation_start": start_date,
-                    "sort_order": "desc",
-                },
-                timeout=30,
-            )
-            if resp.status_code != 200:
-                logger.error(f"FRED API error {resp.status_code}: {resp.text[:200]}")
-                return []
+            try:
+                resp = requests.get(
+                    self.BASE_URL,
+                    params={
+                        "series_id": series_def["series_id"],
+                        "api_key": self.api_key,
+                        "file_type": "json",
+                        "observation_start": start_date,
+                        "sort_order": "desc",
+                    },
+                    timeout=30,
+                )
+                if resp.status_code == 500 and attempt < max_retries - 1:
+                    logger.warning(f"FRED 500 error for {series_name}, retrying ({attempt + 1}/{max_retries})...")
+                    time.sleep(1)
+                    continue
+                if resp.status_code != 200:
+                    logger.error(f"FRED API error {resp.status_code}: {resp.text[:200]}")
+                    return []
 
-            data = resp.json()
-            observations = data.get("observations", [])
+                data = resp.json()
+                observations = data.get("observations", [])
 
-            result = []
-            for obs in observations:
-                val = obs.get("value")
-                if val is not None and val != ".":
-                    try:
-                        result.append({
-                            "period": obs["date"],
-                            "value": float(val),
-                        })
-                    except (ValueError, TypeError):
-                        pass
+                result = []
+                for obs in observations:
+                    val = obs.get("value")
+                    if val is not None and val != ".":
+                        try:
+                            result.append({
+                                "period": obs["date"],
+                                "value": float(val),
+                            })
+                        except (ValueError, TypeError):
+                            pass
 
-            self._write_cache(ck, result)
-            return result
+                self._write_cache(ck, result)
+                return result
 
-        except requests.RequestException as e:
-            logger.error(f"FRED request failed: {e}")
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"FRED request failed for {series_name}, retrying: {e}")
+                    time.sleep(1)
+                    continue
+                logger.error(f"FRED request failed: {e}")
             return []
 
     def get_latest(self, series_name: str) -> dict | None:

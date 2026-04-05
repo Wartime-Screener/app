@@ -2064,8 +2064,21 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
 
         metrics[metric_name] = _build_metric_entry(current, clean, percentile)
 
-    # Compute growth metrics from income statements
+    # Operating ratio (operating expenses / revenue) — key for railroads, industrials
     income = fmp_client.get_income_statement(ticker, period="annual", limit=history_years + 1)
+    if income:
+        or_series = []
+        for stmt in income:
+            rev = _safe_float(stmt.get("revenue"))
+            op_inc = _safe_float(stmt.get("operatingIncome"))
+            if rev and rev > 0 and op_inc is not None:
+                or_series.append(1.0 - (op_inc / rev))
+        if or_series:
+            current_or = or_series[0]
+            percentile_or = compute_percentile_rank(current_or, or_series)
+            metrics["operating_ratio"] = _build_metric_entry(current_or, or_series, percentile_or)
+
+    # Compute growth metrics from income statements
     if income and len(income) >= 2:
         revenues = _extract_metric_series(income, "revenue")
         rev_growth = _compute_growth(revenues)

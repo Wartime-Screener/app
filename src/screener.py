@@ -98,6 +98,7 @@ def scan_universe(universe_name: str, fmp_client, tradier_client,
 def scan_all_universes(fmp_client, tradier_client,
                         universe_names: list[str] | None = None,
                         progress_callback=None,
+                        cancel_check=None,
                         history_years: int | None = None) -> pd.DataFrame:
     """
     Run screening across multiple (or all) universes and combine results.
@@ -107,6 +108,7 @@ def scan_all_universes(fmp_client, tradier_client,
         tradier_client: Initialized TradierClient instance.
         universe_names: List of universe names to scan. If None, scans all.
         progress_callback: Optional callable(current, total, ticker) for progress.
+        cancel_check: Optional callable() that returns True if scan should stop.
 
     Returns:
         Combined DataFrame sorted by composite_score ascending.
@@ -123,7 +125,11 @@ def scan_all_universes(fmp_client, tradier_client,
         uni = load_universe(name)
         total_tickers += len(uni)
 
+    _cancelled = False
     for name in universe_names:
+        if _cancelled:
+            break
+
         uni_df = load_universe(name)
         tickers = uni_df["ticker"].tolist()
 
@@ -133,6 +139,10 @@ def scan_all_universes(fmp_client, tradier_client,
             quotes_df = tradier_client.get_quotes(tickers)
 
         for _, row in uni_df.iterrows():
+            if cancel_check and cancel_check():
+                _cancelled = True
+                break
+
             ticker = row["ticker"]
             global_idx += 1
 
