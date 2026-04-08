@@ -2555,7 +2555,8 @@ elif active_tab == "Ticker Deep Dive":
                     # instead of st.expander because the parent DCF section is
                     # itself an expander, and Streamlit forbids nesting.
                     if dcf_mode == "FCF":
-                        _edgar_toggle_key = f"edgar_overlay_{ticker}"
+                        _edgar_ticker = _analysis.get("ticker", "_unknown")
+                        _edgar_toggle_key = f"edgar_overlay_{_edgar_ticker}"
                         if _edgar_toggle_key not in st.session_state:
                             st.session_state[_edgar_toggle_key] = False
                         _edgar_open = st.session_state[_edgar_toggle_key]
@@ -2564,10 +2565,10 @@ elif active_tab == "Ticker Deep Dive":
                             if _edgar_open
                             else "🔍 Verify Capital Actions with SEC EDGAR (US filers only)"
                         )
-                        if st.button(_toggle_label, key=f"edgar_btn_{ticker}", use_container_width=True):
+                        if st.button(_toggle_label, key=f"edgar_btn_{_edgar_ticker}", use_container_width=True):
                             st.session_state[_edgar_toggle_key] = not _edgar_open
                             _edgar_open = st.session_state[_edgar_toggle_key]
-                    if dcf_mode == "FCF" and st.session_state.get(f"edgar_overlay_{ticker}", False):
+                    if dcf_mode == "FCF" and st.session_state.get(f"edgar_overlay_{_analysis.get('ticker', '_unknown')}", False):
                         with st.container(border=True):
                             st.caption(
                                 "Compares the auto-paydown estimate (derived from year-over-year "
@@ -2584,7 +2585,7 @@ elif active_tab == "Ticker Deep Dive":
                                 _ca_shares = _ca_assumptions.get("shares_outstanding")
                                 _ca_fmp_share_dec = (_ca_fmp_share_chg / 100.0) if _ca_fmp_share_chg is not None else None
 
-                                _edgar_cap = edgar.get_capital_actions(ticker, years=5)
+                                _edgar_cap = edgar.get_capital_actions(_analysis.get("ticker", ""), years=5)
                                 _recon = reconcile_capital_actions(
                                     edgar_data=_edgar_cap,
                                     fmp_auto_debt_paydown=_ca_fmp_paydown,
