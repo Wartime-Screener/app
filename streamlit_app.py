@@ -2551,11 +2551,24 @@ elif active_tab == "Ticker Deep Dive":
                     # --- EDGAR capital actions verification (FCF mode only) ---
                     # Cross-check the FMP balance-sheet auto-paydown against
                     # SEC EDGAR XBRL cash flow statement tags. Lazy: only fetched
-                    # when the user expands the section, so it doesn't slow down
-                    # normal DCF flow. US filers only — gracefully reports
-                    # "unavailable" for foreign issuers.
+                    # when the user clicks the toggle. Uses a session-state flag
+                    # instead of st.expander because the parent DCF section is
+                    # itself an expander, and Streamlit forbids nesting.
                     if dcf_mode == "FCF":
-                        with st.expander("🔍 Verify Capital Actions with SEC EDGAR (US filers only)", expanded=False):
+                        _edgar_toggle_key = f"edgar_overlay_{ticker}"
+                        if _edgar_toggle_key not in st.session_state:
+                            st.session_state[_edgar_toggle_key] = False
+                        _edgar_open = st.session_state[_edgar_toggle_key]
+                        _toggle_label = (
+                            "🔽 Hide EDGAR capital actions check"
+                            if _edgar_open
+                            else "🔍 Verify Capital Actions with SEC EDGAR (US filers only)"
+                        )
+                        if st.button(_toggle_label, key=f"edgar_btn_{ticker}", use_container_width=True):
+                            st.session_state[_edgar_toggle_key] = not _edgar_open
+                            _edgar_open = st.session_state[_edgar_toggle_key]
+                    if dcf_mode == "FCF" and st.session_state.get(f"edgar_overlay_{ticker}", False):
+                        with st.container(border=True):
                             st.caption(
                                 "Compares the auto-paydown estimate (derived from year-over-year "
                                 "balance sheet differencing) against EDGAR's XBRL cash flow statement "
