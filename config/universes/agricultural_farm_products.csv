@@ -1,7 +1,10 @@
 ticker,company_name,segment,sub_segment
 ADM,Archer-Daniels-Midland Company,agricultural_farm_products,
+AGRO,Adecoagro S.A.,agricultural_farm_products,
 BG,Bunge Global S.A.,agricultural_farm_products,
 CALM,"Cal-Maine Foods, Inc.",agricultural_farm_products,
+DOLE,Dole plc,agricultural_farm_products,
+FDP,Fresh Del Monte Produce Inc.,agricultural_farm_products,
 SFD,"Smithfield Foods, Inc.",agricultural_farm_products,
 TSN,"Tyson Foods, Inc.",agricultural_farm_products,
 VITL,"Vital Farms, Inc.",agricultural_farm_products,

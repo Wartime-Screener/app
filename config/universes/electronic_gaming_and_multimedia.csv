@@ -1,6 +1,7 @@
 ticker,company_name,segment,sub_segment
-ATVI,"Activision Blizzard, Inc.",electronic_gaming_and_multimedia,
-AVID,"Avid Technology, Inc.",electronic_gaming_and_multimedia,
+BILI,Bilibili Inc.,electronic_gaming_and_multimedia,
 EA,Electronic Arts Inc.,electronic_gaming_and_multimedia,
+NTES,"NetEase, Inc.",electronic_gaming_and_multimedia,
+PLTK,Playtika Holding Corp.,electronic_gaming_and_multimedia,
 RBLX,Roblox Corporation,electronic_gaming_and_multimedia,
 TTWO,"Take-Two Interactive Software, Inc.",electronic_gaming_and_multimedia,

@@ -1,8 +1,8 @@
 ticker,company_name,segment,sub_segment
 BC,Brunswick Corporation,auto_recreational_vehicles,
+DOO,BRP Inc.,auto_recreational_vehicles,
 HOG,"Harley-Davidson, Inc.",auto_recreational_vehicles,
 LCII,LCI Industries,auto_recreational_vehicles,
-MBUU,"Malibu Boats, Inc.",auto_recreational_vehicles,
 PII,Polaris Inc.,auto_recreational_vehicles,
 THO,"Thor Industries, Inc.",auto_recreational_vehicles,
 WGO,"Winnebago Industries, Inc.",auto_recreational_vehicles,

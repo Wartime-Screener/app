@@ -52,6 +52,12 @@ def fetch_screener(min_market_cap: int) -> list[dict]:
     def is_operating_company(d: dict) -> bool:
         if d.get("isEtf") or d.get("isFund"):
             return False
+        # Filter delisted / non-trading tickers (e.g. acquired companies whose
+        # last-known market cap is still above the threshold). FMP's screener
+        # leaves these in the result set; we drop them here so universes never
+        # contain stale tickers from M&A activity.
+        if d.get("isActivelyTrading") is False:
+            return False
         if not d.get("industry"):
             return False
         name = d.get("companyName", "")
