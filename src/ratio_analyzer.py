@@ -199,6 +199,145 @@ def _compute_trend(values: list[float]) -> str:
     return "volatile"
 
 
+def reconcile_capital_actions(edgar_data: dict,
+                               fmp_auto_debt_paydown: float | None,
+                               fmp_hist_share_change_pct: float | None,
+                               shares_outstanding: float | None) -> dict:
+    """
+    Cross-check the FMP balance-sheet auto-estimates against EDGAR XBRL cash
+    flow statement values for debt paydown and buybacks.
+
+    The FMP auto-estimate is derived from year-over-year balance sheet
+    differencing, which has a structural blind spot for refinancing activity:
+    a company that repays $5B and issues $5B of new debt shows zero balance
+    sheet change but had $5B of cash flow paydown. EDGAR cash flow tags
+    (RepaymentsOfLongTermDebt - ProceedsFromIssuanceOfLongTermDebt) catch this.
+
+    Args:
+        edgar_data: Output of EDGARClient.get_capital_actions(ticker).
+        fmp_auto_debt_paydown: Annual debt paydown ($) from balance sheet
+            differencing — same value the DCF currently uses as auto-default.
+        fmp_hist_share_change_pct: Historical annual share count change as
+            decimal (e.g. -0.03 for 3% buyback shrinkage).
+        shares_outstanding: Current diluted shares (for converting EDGAR
+            buyback dollars into an implied % share change).
+
+    Returns:
+        Dict with comparison rows and a verdict for each metric:
+          debt_paydown: {fmp, edgar, delta_pct, agreement, note}
+          buybacks: {fmp_implied_pct, edgar_dollars, edgar_implied_pct, agreement, note}
+          available: bool — False if EDGAR returned no usable data
+    """
+    result = {
+        "available": bool(edgar_data and edgar_data.get("available")),
+        "debt_paydown": None,
+        "buybacks": None,
+    }
+    if not result["available"]:
+        result["note"] = (edgar_data or {}).get("note") if edgar_data else "No EDGAR data"
+        return result
+
+    # ---- Debt paydown reconciliation ----
+    edgar_paydown = edgar_data.get("avg_annual_net_paydown")
+    if edgar_paydown is not None and fmp_auto_debt_paydown is not None:
+        # Sign-aware comparison: a sign mismatch (one says paydown, other says
+        # net issuance) is the most important thing to flag.
+        sign_match = (edgar_paydown >= 0) == (fmp_auto_debt_paydown >= 0)
+        # Use max of abs values as denominator to avoid div-by-zero
+        scale = max(abs(edgar_paydown), abs(fmp_auto_debt_paydown), 1.0)
+        delta_pct = (edgar_paydown - fmp_auto_debt_paydown) / scale * 100
+
+        if not sign_match:
+            agreement = "mismatch"
+            note = (
+                "Sign disagreement: one method says paying down debt, the other "
+                "says taking on debt. EDGAR (cash flow statement) is the more "
+                "reliable signal — refinancing activity often hides this on "
+                "the balance sheet."
+            )
+        elif abs(delta_pct) <= 30:
+            agreement = "agree"
+            note = "Methods agree within 30% — auto-estimate is reliable."
+        elif abs(delta_pct) <= 100:
+            agreement = "caution"
+            note = (
+                "Methods disagree by 30-100%. Likely refinancing activity that "
+                "balance sheet differencing partially misses. Consider EDGAR value."
+            )
+        else:
+            agreement = "major"
+            note = (
+                "Methods disagree by >100%. Heavy refinancing or non-standard "
+                "debt structure. EDGAR cash flow value is more reliable."
+            )
+
+        result["debt_paydown"] = {
+            "fmp": fmp_auto_debt_paydown,
+            "edgar": edgar_paydown,
+            "delta_pct": round(delta_pct, 1),
+            "agreement": agreement,
+            "note": note,
+        }
+    elif edgar_paydown is not None:
+        result["debt_paydown"] = {
+            "fmp": None,
+            "edgar": edgar_paydown,
+            "delta_pct": None,
+            "agreement": "edgar_only",
+            "note": "Balance sheet auto-estimate unavailable; EDGAR is the only source.",
+        }
+
+    # ---- Buyback reconciliation ----
+    edgar_buybacks = edgar_data.get("avg_annual_buybacks")
+    if edgar_buybacks is not None:
+        # Convert FMP's % share change into an approximate dollar buyback
+        # so the comparison is apples-to-apples. We can't use price directly
+        # (that's what we're valuing), so we just report both: FMP says "X%
+        # share count change", EDGAR says "$Y buybacks". Caller can show both.
+        edgar_implied_pct = None
+        if shares_outstanding and shares_outstanding > 0 and edgar_buybacks > 0:
+            # Rough proxy: avg buyback $ / (shares × ~$avg_price). We don't
+            # have avg historical price here, so we just leave this as a
+            # display hint and let the UI compute it from current price.
+            pass
+
+        agreement = None
+        note = None
+        if fmp_hist_share_change_pct is not None:
+            # FMP says shares are shrinking → company is buying back.
+            # EDGAR says how much they spent on buybacks.
+            if fmp_hist_share_change_pct < -0.01 and edgar_buybacks > 0:
+                agreement = "agree"
+                note = (
+                    "Both methods confirm active buybacks: FMP shows share count "
+                    "shrinking, EDGAR shows real cash spent on repurchases."
+                )
+            elif fmp_hist_share_change_pct > 0.01 and edgar_buybacks > 0:
+                agreement = "caution"
+                note = (
+                    "Disagreement: share count is GROWING (likely from stock comp "
+                    "or secondary issuance) despite material buyback spending. "
+                    "Net dilution = SBC outpacing repurchases. The FMP share-count "
+                    "trend is the more useful signal for per-share DCF math."
+                )
+            elif edgar_buybacks == 0:
+                agreement = "agree"
+                note = "No buyback activity per either source."
+            else:
+                agreement = "agree"
+                note = "Both methods broadly consistent."
+
+        result["buybacks"] = {
+            "fmp_share_change_pct": fmp_hist_share_change_pct,
+            "edgar_dollars": edgar_buybacks,
+            "edgar_implied_pct": edgar_implied_pct,
+            "agreement": agreement,
+            "note": note,
+        }
+
+    return result
+
+
 def compute_analyst_accuracy(analyst_estimates: list[dict],
                              income_statements: list[dict]) -> dict | None:
     """Compare analyst consensus estimates to actual results for completed fiscal years.

@@ -29,7 +29,30 @@ CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "edgar"
 DEFAULT_TTLS = {
     "ticker_map": 604800,    # 7 days — ticker-to-CIK mapping changes rarely
     "submissions": 86400,    # 24 hours — filing history
+    "companyfacts": 86400,   # 24 hours — XBRL fact history
 }
+
+# us-gaap tag fallback chains for capital-action facts. Companies tag these
+# inconsistently, so we walk the chain in order and take the first one with
+# usable annual data.
+BUYBACK_TAGS = [
+    "PaymentsForRepurchaseOfCommonStock",
+    "PaymentsForRepurchaseOfEquity",
+    "StockRepurchasedAndRetiredDuringPeriodValue",
+    "TreasuryStockValueAcquiredCostMethod",
+]
+DEBT_REPAYMENT_TAGS = [
+    "RepaymentsOfLongTermDebt",
+    "RepaymentsOfDebt",
+    "RepaymentsOfNotesPayable",
+    "RepaymentsOfLongTermDebtAndCapitalSecurities",
+]
+DEBT_ISSUANCE_TAGS = [
+    "ProceedsFromIssuanceOfLongTermDebt",
+    "ProceedsFromIssuanceOfDebt",
+    "ProceedsFromNotesPayable",
+    "ProceedsFromLongTermDebt",
+]
 
 USER_AGENT = "StockScreener/1.0 contact@example.com"
 
@@ -380,6 +403,202 @@ class EDGARClient:
             })
 
         return results
+
+    # ------------------------------------------------------------------ #
+    # Company facts (XBRL) — capital actions verification
+    # ------------------------------------------------------------------ #
+
+    def get_company_facts(self, ticker: str) -> dict | None:
+        """
+        Fetch the full XBRL companyfacts JSON for a ticker.
+
+        Returns the raw SEC response or None if unavailable. Foreign filers
+        (20-F with IFRS tags) often return either no data or a near-empty
+        us-gaap section — callers should handle that gracefully.
+        """
+        cik = self.get_cik(ticker)
+        if cik is None:
+            return None
+
+        padded_cik = str(cik).zfill(10)
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{padded_cik}.json"
+        ck = self._cache_key(f"companyfacts_{padded_cik}")
+        return self._make_request(url, cache_key=ck, cache_category="companyfacts")
+
+    def _extract_annual_fact_series(self, facts_root: dict, tag_chain: list[str],
+                                     years: int) -> tuple[list[dict], str | None]:
+        """
+        Walk a fallback chain of us-gaap tags and return the first one with
+        usable annual data.
+
+        Returns:
+            (series, source_tag) where series is a list of
+            {fiscal_year, value, end_date, filed, accession} dicts ordered
+            most-recent-first, and source_tag is the tag actually used (or
+            None if no chain entry produced data).
+        """
+        us_gaap = (facts_root or {}).get("facts", {}).get("us-gaap", {})
+        if not us_gaap:
+            return [], None
+
+        for tag in tag_chain:
+            tag_data = us_gaap.get(tag)
+            if not tag_data:
+                continue
+            usd_units = tag_data.get("units", {}).get("USD", [])
+            if not usd_units:
+                continue
+
+            # Filter to annual periods only (fp == "FY") and dedup by period
+            # end date, keeping the latest-filed entry to capture restatements.
+            by_period: dict[str, dict] = {}
+            for entry in usd_units:
+                if entry.get("fp") != "FY":
+                    continue
+                form = entry.get("form", "")
+                # Only trust 10-K / 10-K/A for annual figures (10-Q "FY" is rare
+                # but possible for stub periods — skip those)
+                if not form.startswith("10-K"):
+                    continue
+                end = entry.get("end")
+                if not end:
+                    continue
+                existing = by_period.get(end)
+                if existing is None or entry.get("filed", "") > existing.get("filed", ""):
+                    by_period[end] = entry
+
+            if not by_period:
+                continue
+
+            # Sort by period end date desc, take the most recent N years
+            sorted_entries = sorted(by_period.values(),
+                                    key=lambda e: e.get("end", ""),
+                                    reverse=True)[:years]
+
+            series = []
+            for e in sorted_entries:
+                end = e.get("end", "")
+                try:
+                    fiscal_year = int(end[:4])
+                except (ValueError, IndexError):
+                    continue
+                series.append({
+                    "fiscal_year": fiscal_year,
+                    "value": float(e.get("val", 0)),
+                    "end_date": end,
+                    "filed": e.get("filed"),
+                    "accession": e.get("accn"),
+                })
+
+            if series:
+                return series, tag
+
+        return [], None
+
+    def get_capital_actions(self, ticker: str, years: int = 5) -> dict:
+        """
+        Pull buyback, debt repayment, and debt issuance series from XBRL
+        cash flow statement tags. Net debt paydown = repayments - issuance.
+
+        This is the verification overlay for the DCF auto-paydown estimate
+        (which is currently derived from balance sheet differencing). EDGAR
+        cash flow tags catch refinancing activity that balance sheet
+        differencing misses.
+
+        Args:
+            ticker: Stock ticker symbol.
+            years: Number of most-recent annual periods to return.
+
+        Returns:
+            Dict with:
+              available (bool): True if any cash-flow data was found
+              annual_data (list): Most-recent-first list of per-year dicts
+                with fiscal_year, buybacks, debt_repayments, debt_issuance,
+                net_debt_paydown
+              avg_annual_buybacks (float | None): mean across available years
+              avg_annual_net_paydown (float | None): mean across available years
+              source_tags (dict): which us-gaap tag was actually used for each
+              note (str | None): human-readable note for foreign filers / gaps
+        """
+        result = {
+            "available": False,
+            "annual_data": [],
+            "avg_annual_buybacks": None,
+            "avg_annual_net_paydown": None,
+            "source_tags": {"buybacks": None, "debt_repayments": None, "debt_issuance": None},
+            "note": None,
+        }
+
+        facts = self.get_company_facts(ticker)
+        if not facts:
+            result["note"] = (
+                "No EDGAR companyfacts data — likely a foreign private issuer "
+                "(20-F filer with IFRS tags) or a ticker not in the SEC ticker map."
+            )
+            return result
+
+        buyback_series, buyback_tag = self._extract_annual_fact_series(
+            facts, BUYBACK_TAGS, years)
+        repay_series, repay_tag = self._extract_annual_fact_series(
+            facts, DEBT_REPAYMENT_TAGS, years)
+        issue_series, issue_tag = self._extract_annual_fact_series(
+            facts, DEBT_ISSUANCE_TAGS, years)
+
+        result["source_tags"] = {
+            "buybacks": buyback_tag,
+            "debt_repayments": repay_tag,
+            "debt_issuance": issue_tag,
+        }
+
+        if not (buyback_series or repay_series or issue_series):
+            result["note"] = (
+                "EDGAR returned data but none of the standard us-gaap cash "
+                "flow tags were populated. Likely a non-standard filer."
+            )
+            return result
+
+        # Index each series by fiscal year so we can join them
+        def _by_year(series: list[dict]) -> dict[int, float]:
+            return {row["fiscal_year"]: row["value"] for row in series}
+
+        buybacks_by_year = _by_year(buyback_series)
+        repayments_by_year = _by_year(repay_series)
+        issuance_by_year = _by_year(issue_series)
+
+        all_years = sorted(
+            set(buybacks_by_year) | set(repayments_by_year) | set(issuance_by_year),
+            reverse=True,
+        )[:years]
+
+        annual_data = []
+        for fy in all_years:
+            bb = buybacks_by_year.get(fy)
+            rp = repayments_by_year.get(fy)
+            iss = issuance_by_year.get(fy)
+            net_paydown = None
+            if rp is not None:
+                # Net = repayments - issuance. If issuance is missing, treat
+                # it as zero rather than dropping the year (better than nothing).
+                net_paydown = rp - (iss or 0)
+            annual_data.append({
+                "fiscal_year": fy,
+                "buybacks": bb,
+                "debt_repayments": rp,
+                "debt_issuance": iss,
+                "net_debt_paydown": net_paydown,
+            })
+
+        # Averages over years where the metric was actually present
+        bb_values = [r["buybacks"] for r in annual_data if r["buybacks"] is not None]
+        np_values = [r["net_debt_paydown"] for r in annual_data if r["net_debt_paydown"] is not None]
+
+        result["available"] = True
+        result["annual_data"] = annual_data
+        result["avg_annual_buybacks"] = sum(bb_values) / len(bb_values) if bb_values else None
+        result["avg_annual_net_paydown"] = sum(np_values) / len(np_values) if np_values else None
+        return result
+
+    # ------------------------------------------------------------------ #
 
     def find_transcript_gaps(self, ticker: str,
                               fmp_transcript_dates: list[dict],
