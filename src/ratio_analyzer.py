@@ -202,7 +202,8 @@ def _compute_trend(values: list[float]) -> str:
 def reconcile_capital_actions(edgar_data: dict,
                                fmp_auto_debt_paydown: float | None,
                                fmp_hist_share_change_pct: float | None,
-                               shares_outstanding: float | None) -> dict:
+                               shares_outstanding: float | None,
+                               current_price: float | None = None) -> dict:
     """
     Cross-check the FMP balance-sheet auto-estimates against EDGAR XBRL cash
     flow statement values for debt paydown and buybacks.
@@ -287,51 +288,107 @@ def reconcile_capital_actions(edgar_data: dict,
             "note": "Balance sheet auto-estimate unavailable; EDGAR is the only source.",
         }
 
-    # ---- Buyback reconciliation ----
+    # ---- Buyback reconciliation + SBC absorption ----
+    # The two metrics measure different things:
+    #   FMP share count Δ  = ACTUAL annual change in diluted shares
+    #   EDGAR buyback yield = INTENSITY (cash spent / market cap)
+    # The gap between them is the stock-based-compensation treadmill: dollars
+    # spent on buybacks that are absorbed by employee stock issuance instead
+    # of flowing through to actual share count reduction.
     edgar_buybacks = edgar_data.get("avg_annual_buybacks")
     if edgar_buybacks is not None:
-        # Convert FMP's % share change into an approximate dollar buyback
-        # so the comparison is apples-to-apples. We can't use price directly
-        # (that's what we're valuing), so we just report both: FMP says "X%
-        # share count change", EDGAR says "$Y buybacks". Caller can show both.
-        edgar_implied_pct = None
-        if shares_outstanding and shares_outstanding > 0 and edgar_buybacks > 0:
-            # Rough proxy: avg buyback $ / (shares × ~$avg_price). We don't
-            # have avg historical price here, so we just leave this as a
-            # display hint and let the UI compute it from current price.
-            pass
+        # EDGAR buyback yield: how much of market cap was spent per year
+        edgar_yield = None
+        if (shares_outstanding and shares_outstanding > 0
+                and current_price and current_price > 0
+                and edgar_buybacks > 0):
+            edgar_yield = edgar_buybacks / (shares_outstanding * current_price)
 
+        # SBC absorption math: gap between intensity and actual reduction
+        sbc_absorption_pct = None      # 0-100+ scale: % of buyback budget absorbed by SBC
+        effective_reduction = None     # how much shares actually fell (positive = shrinking)
+        treadmill_gap = None           # buyback_yield - effective_reduction (decimal)
+        if edgar_yield is not None and fmp_hist_share_change_pct is not None:
+            # effective_reduction = -share_change_pct (positive when shares fall)
+            effective_reduction = -fmp_hist_share_change_pct
+            treadmill_gap = edgar_yield - effective_reduction
+            if edgar_yield > 0:
+                # What fraction of buyback budget didn't make it through to retirement?
+                sbc_absorption_pct = (treadmill_gap / edgar_yield) * 100
+
+        # Verdict classification
         agreement = None
+        verdict_label = None
         note = None
-        if fmp_hist_share_change_pct is not None:
-            # FMP says shares are shrinking → company is buying back.
-            # EDGAR says how much they spent on buybacks.
-            if fmp_hist_share_change_pct < -0.01 and edgar_buybacks > 0:
-                agreement = "agree"
-                note = (
-                    "Both methods confirm active buybacks: FMP shows share count "
-                    "shrinking, EDGAR shows real cash spent on repurchases."
-                )
-            elif fmp_hist_share_change_pct > 0.01 and edgar_buybacks > 0:
-                agreement = "caution"
-                note = (
-                    "Disagreement: share count is GROWING (likely from stock comp "
-                    "or secondary issuance) despite material buyback spending. "
-                    "Net dilution = SBC outpacing repurchases. The FMP share-count "
-                    "trend is the more useful signal for per-share DCF math."
-                )
-            elif edgar_buybacks == 0:
-                agreement = "agree"
-                note = "No buyback activity per either source."
-            else:
-                agreement = "agree"
-                note = "Both methods broadly consistent."
+
+        if edgar_buybacks < 1e6:  # essentially zero buybacks
+            agreement = "agree"
+            verdict_label = "No Buyback Activity"
+            note = "No material buyback activity per either source."
+        elif fmp_hist_share_change_pct is None or sbc_absorption_pct is None:
+            # Have buybacks but missing context for full verdict
+            agreement = "agree"
+            verdict_label = "Buybacks Active"
+            note = (
+                f"EDGAR shows ${edgar_buybacks/1e9:.2f}B/yr in buybacks. "
+                "Insufficient data to compute SBC absorption."
+            )
+        elif fmp_hist_share_change_pct > 0 or (sbc_absorption_pct is not None and sbc_absorption_pct > 100):
+            # Share count growing despite buybacks → SBC outpacing repurchases.
+            # Either condition catches it: explicit positive share growth, OR
+            # the absorption math says treadmill_gap > buyback_yield (which is
+            # the same thing said differently).
+            agreement = "mismatch"
+            verdict_label = "Net Dilution (Treadmill Losing)"
+            note = (
+                f"Spending ~{edgar_yield*100:.1f}% of market cap per year on buybacks, "
+                f"yet share count is GROWING by {fmp_hist_share_change_pct*100:.1f}%/yr. "
+                "Stock-based comp is outpacing repurchases — value-destructive use of cash. "
+                "The buyback program is failing to even tread water."
+            )
+        elif sbc_absorption_pct >= 75:
+            agreement = "major"
+            verdict_label = "Heavy Treadmill"
+            note = (
+                f"~{sbc_absorption_pct:.0f}% of the {edgar_yield*100:.1f}% buyback budget is "
+                f"absorbed by SBC offset. Only {effective_reduction*100:.1f}%/yr of net share "
+                "reduction is reaching shareholders. Most of the buyback spending is "
+                "treading water against employee stock comp."
+            )
+        elif sbc_absorption_pct >= 50:
+            agreement = "caution"
+            verdict_label = "Significant Treadmill"
+            note = (
+                f"~{sbc_absorption_pct:.0f}% of the {edgar_yield*100:.1f}% buyback budget is "
+                f"absorbed by SBC offset. Net effective reduction: {effective_reduction*100:.1f}%/yr. "
+                "Half the buyback program just offsets dilution."
+            )
+        elif sbc_absorption_pct >= 25:
+            agreement = "caution"
+            verdict_label = "Partial Treadmill"
+            note = (
+                f"~{sbc_absorption_pct:.0f}% absorbed by SBC. Spending {edgar_yield*100:.1f}% of "
+                f"market cap to net {effective_reduction*100:.1f}%/yr of share reduction. "
+                "Modest dilution drag — buyback program is mostly working."
+            )
+        else:
+            agreement = "agree"
+            verdict_label = "Clean Buyback"
+            note = (
+                f"Spending {edgar_yield*100:.1f}% of market cap on buybacks and netting "
+                f"{effective_reduction*100:.1f}%/yr in actual share reduction — only "
+                f"{max(sbc_absorption_pct, 0):.0f}% lost to SBC offset. Real shareholder return."
+            )
 
         result["buybacks"] = {
             "fmp_share_change_pct": fmp_hist_share_change_pct,
             "edgar_dollars": edgar_buybacks,
-            "edgar_implied_pct": edgar_implied_pct,
+            "edgar_yield": edgar_yield,
+            "effective_reduction": effective_reduction,
+            "sbc_absorption_pct": sbc_absorption_pct,
+            "treadmill_gap": treadmill_gap,
             "agreement": agreement,
+            "verdict_label": verdict_label,
             "note": note,
         }
 

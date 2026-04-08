@@ -2591,6 +2591,7 @@ elif active_tab == "Ticker Deep Dive":
                                     fmp_auto_debt_paydown=_ca_fmp_paydown,
                                     fmp_hist_share_change_pct=_ca_fmp_share_dec,
                                     shares_outstanding=_ca_shares,
+                                    current_price=_dcf_current_price,
                                 )
 
                                 if not _recon["available"]:
@@ -2639,42 +2640,70 @@ elif active_tab == "Ticker Deep Dive":
                                             unsafe_allow_html=True,
                                         )
 
-                                    # ---- Buyback comparison ----
+                                    # ---- Buyback comparison + SBC absorption verdict ----
                                     _bb = _recon.get("buybacks")
                                     if _bb:
-                                        st.markdown("**Annual Buybacks**")
-                                        _bb_badge = _badge_colors.get(_bb.get("agreement"), ("•", "#999", "—"))
-                                        _bb_cols = st.columns(3)
+                                        st.markdown("**Annual Buybacks & SBC Absorption**")
+                                        # Custom badge palette: more granular than the debt-paydown one
+                                        _bb_label_palette = {
+                                            "Clean Buyback":              ("✅", "#4ade80"),
+                                            "Partial Treadmill":          ("🟢", "#86efac"),
+                                            "Significant Treadmill":      ("⚠️", "#fbbf24"),
+                                            "Heavy Treadmill":            ("🔴", "#f87171"),
+                                            "Net Dilution (Treadmill Losing)": ("🔴", "#f87171"),
+                                            "No Buyback Activity":        ("•",  "#9ca3af"),
+                                            "Buybacks Active":            ("ℹ️", "#60a5fa"),
+                                        }
+                                        _bb_label = _bb.get("verdict_label", "—")
+                                        _bb_emoji, _bb_color = _bb_label_palette.get(_bb_label, ("•", "#9ca3af"))
+
+                                        _bb_cols = st.columns(4)
                                         with _bb_cols[0]:
                                             _bb_pct = _bb.get("fmp_share_change_pct")
                                             st.metric(
-                                                "FMP (share count Δ)",
+                                                "Actual share Δ (FMP)",
                                                 f"{_bb_pct*100:+.1f}%/yr" if _bb_pct is not None else "N/A",
-                                                help="Negative = shrinking (buybacks), Positive = growing (dilution)."
+                                                help="The real change in diluted share count, year over year. "
+                                                     "Negative = shrinking (real reduction), positive = growing (dilution). "
+                                                     "This is what flows to your DCF per-share denominator."
                                             )
                                         with _bb_cols[1]:
                                             st.metric(
-                                                "EDGAR (cash spent)",
+                                                "Buyback $ (EDGAR)",
                                                 f"${_bb['edgar_dollars']/1e9:.2f}B/yr",
-                                                help="PaymentsForRepurchaseOfCommonStock, 5yr avg."
+                                                help="PaymentsForRepurchaseOfCommonStock, 5yr avg from SEC XBRL filings."
                                             )
                                         with _bb_cols[2]:
-                                            # Implied % from EDGAR using current price
-                                            if _ca_shares and _dcf_current_price and _bb["edgar_dollars"]:
-                                                _impl_pct = (_bb["edgar_dollars"] / (_ca_shares * _dcf_current_price)) * 100
+                                            _bb_yld = _bb.get("edgar_yield")
+                                            st.metric(
+                                                "Buyback yield",
+                                                f"{_bb_yld*100:.1f}%" if _bb_yld is not None else "—",
+                                                help="Buyback dollars ÷ market cap. The 'intensity' of the buyback program — "
+                                                     "what % of market cap they spend on repurchases each year."
+                                            )
+                                        with _bb_cols[3]:
+                                            _abs = _bb.get("sbc_absorption_pct")
+                                            if _abs is not None:
+                                                # Color the delta inversely: lower absorption is better
+                                                _abs_delta_color = "normal" if _abs >= 50 else "inverse"
                                                 st.metric(
-                                                    "EDGAR implied %",
-                                                    f"{_impl_pct:.1f}%",
-                                                    help="EDGAR $ ÷ (shares × current price). Approximate buyback yield."
+                                                    "SBC absorption",
+                                                    f"{_abs:.0f}%",
+                                                    delta=f"{_abs:.0f}%",
+                                                    delta_color=_abs_delta_color,
+                                                    help="What fraction of the buyback budget is absorbed by stock-based "
+                                                         "compensation (i.e. spent just to offset employee dilution rather "
+                                                         "than actually retire shares). 0% = clean, 100%+ = treadmill losing."
                                                 )
                                             else:
-                                                st.metric("EDGAR implied %", "—")
+                                                st.metric("SBC absorption", "—")
+
                                         if _bb.get("note"):
                                             st.markdown(
-                                                f"<div style='padding:8px 12px; border-left: 3px solid {_bb_badge[1]}; "
-                                                f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 6px 0'>"
-                                                f"<strong style='color:{_bb_badge[1]}'>{_bb_badge[0]} {_bb_badge[2]}</strong> "
-                                                f"<span style='font-size:0.9em'>— {_bb['note']}</span>"
+                                                f"<div style='padding:10px 14px; border-left: 3px solid {_bb_color}; "
+                                                f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 8px 0'>"
+                                                f"<strong style='color:{_bb_color}'>{_bb_emoji} {_bb_label}</strong><br>"
+                                                f"<span style='font-size:0.9em'>{_bb['note']}</span>"
                                                 f"</div>",
                                                 unsafe_allow_html=True,
                                             )
