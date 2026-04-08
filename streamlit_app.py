@@ -1186,6 +1186,145 @@ elif active_tab == "Ticker Deep Dive":
                         _acc_rows.append(row)
                     st.dataframe(pd.DataFrame(_acc_rows), use_container_width=True, hide_index=True)
 
+        # Forensic-accounting Quality Scores: Piotroski / Altman / Beneish
+        with st.expander("Quality Scores (Piotroski / Altman / Beneish)", expanded=False):
+            st.caption(
+                "Three independent forensic scores: **Piotroski** (9-point fundamental "
+                "improvement), **Altman** (5-factor bankruptcy risk), **Beneish** "
+                "(8-ratio earnings manipulation detector). Use them as filters AFTER "
+                "cheapness — they distinguish genuine value from value traps."
+            )
+
+            _piotroski = analysis.get("piotroski_f_score") or {}
+            _altman    = analysis.get("altman_z_score") or {}
+            _beneish   = analysis.get("beneish_m_score") or {}
+
+            # Top-level summary metrics
+            _qs_cols = st.columns(3)
+
+            with _qs_cols[0]:
+                if _piotroski.get("has_data"):
+                    _f_score = _piotroski["score"]
+                    _f_interp = _piotroski["interpretation"]
+                    _f_color = (
+                        "#4ade80" if _f_score >= 8
+                        else "#fbbf24" if _f_score >= 5
+                        else "#f87171"
+                    )
+                    st.markdown(
+                        f"<div style='padding:14px; border:1px solid {_f_color}; "
+                        f"border-radius:6px; text-align:center'>"
+                        f"<div style='font-size:0.85em; color:#9ca3af'>PIOTROSKI F-SCORE</div>"
+                        f"<div style='font-size:2.2em; font-weight:bold; color:{_f_color}'>"
+                        f"{_f_score} <span style='font-size:0.5em; color:#9ca3af'>/ 9</span></div>"
+                        f"<div style='font-size:0.95em; color:{_f_color}'>{_f_interp}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info(f"Piotroski: {_piotroski.get('note', 'unavailable')}")
+
+            with _qs_cols[1]:
+                if _altman.get("has_data"):
+                    _z = _altman["score"]
+                    _z_class = _altman["classification"]
+                    _z_color = (
+                        "#4ade80" if _z_class == "Safe"
+                        else "#fbbf24" if _z_class == "Grey"
+                        else "#f87171"
+                    )
+                    st.markdown(
+                        f"<div style='padding:14px; border:1px solid {_z_color}; "
+                        f"border-radius:6px; text-align:center'>"
+                        f"<div style='font-size:0.85em; color:#9ca3af'>ALTMAN Z-SCORE</div>"
+                        f"<div style='font-size:2.2em; font-weight:bold; color:{_z_color}'>"
+                        f"{_z:.2f}</div>"
+                        f"<div style='font-size:0.95em; color:{_z_color}'>{_z_class} Zone</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info(f"Altman: {_altman.get('note', 'unavailable')}")
+
+            with _qs_cols[2]:
+                if _beneish.get("has_data"):
+                    _m = _beneish["score"]
+                    _m_class = _beneish["classification"]
+                    _m_color = "#f87171" if _m_class == "Likely Manipulator" else "#4ade80"
+                    st.markdown(
+                        f"<div style='padding:14px; border:1px solid {_m_color}; "
+                        f"border-radius:6px; text-align:center'>"
+                        f"<div style='font-size:0.85em; color:#9ca3af'>BENEISH M-SCORE</div>"
+                        f"<div style='font-size:2.2em; font-weight:bold; color:{_m_color}'>"
+                        f"{_m:.2f}</div>"
+                        f"<div style='font-size:0.95em; color:{_m_color}'>{_m_class}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info(f"Beneish: {_beneish.get('note', 'unavailable')}")
+
+            # Applicability warnings (one row each)
+            for label, score in [("Piotroski", _piotroski), ("Altman", _altman), ("Beneish", _beneish)]:
+                if score.get("has_data") and score.get("note"):
+                    st.caption(f"⚠️ **{label}**: {score['note']}")
+                elif score.get("applicability") == "not_applicable":
+                    pass  # Already shown via st.info above
+
+            st.markdown("---")
+
+            # Per-score detail tabs
+            _qs_tabs = st.tabs(["Piotroski breakdown", "Altman components", "Beneish indices"])
+
+            with _qs_tabs[0]:
+                if _piotroski.get("has_data"):
+                    st.markdown("**9-point fundamental improvement test** (each test scores 1 if passed, 0 if failed)")
+                    _piot_rows = []
+                    for c in _piotroski["components"]:
+                        _piot_rows.append({
+                            "Test": c["name"],
+                            "Result": "✅ PASS" if c["passed"] else "❌ FAIL",
+                            "Detail": c["detail"],
+                        })
+                    st.dataframe(_piot_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info(_piotroski.get("note", "No Piotroski data."))
+
+            with _qs_tabs[1]:
+                if _altman.get("has_data"):
+                    st.markdown(
+                        "**Z = 1.2·A + 1.4·B + 3.3·C + 0.6·D + 1.0·E**  \n"
+                        "*Bands:* Safe ≥ 2.99 · Grey 1.81–2.99 · Distress < 1.81"
+                    )
+                    _alt_rows = []
+                    for c in _altman["components"]:
+                        _alt_rows.append({
+                            "Component": c["label"],
+                            "Value": f"{c['value']:.3f}",
+                            "Weight": f"{c['weight']:.1f}×",
+                            "Contribution": f"{c['contribution']:+.3f}",
+                        })
+                    st.dataframe(_alt_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info(_altman.get("note", "No Altman data."))
+
+            with _qs_tabs[2]:
+                if _beneish.get("has_data"):
+                    st.markdown(
+                        "**M = -4.84 + 0.92·DSRI + 0.528·GMI + 0.404·AQI + 0.892·SGI + 0.115·DEPI − 0.172·SGAI + 4.679·TATA − 0.327·LVGI**  \n"
+                        f"*Threshold:* M > {_beneish.get('threshold', -1.78)} suggests likely manipulation"
+                    )
+                    _ben_rows = []
+                    for c in _beneish["components"]:
+                        _ben_rows.append({
+                            "Index": c["label"],
+                            "Value": c["value"],
+                            "Reading": c["interpretation"],
+                        })
+                    st.dataframe(_ben_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info(_beneish.get("note", "No Beneish data."))
+
         # Revenue Segmentation — product and geographic breakdown
         with st.expander("Revenue Segmentation", expanded=False):
             prod_seg = fmp.get_revenue_product_segmentation(analysis["ticker"])
