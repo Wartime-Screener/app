@@ -39,6 +39,7 @@ from src.ratio_analyzer import (
     run_dcf_monte_carlo, compute_reverse_dcf, compute_reverse_revenue_dcf,
     compute_earnings_dcf_valuation, compute_reverse_earnings_dcf,
     infer_dcf_model, _load_scoring_config,
+    compute_analyst_accuracy,
 )
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
@@ -1100,6 +1101,91 @@ elif active_tab == "Ticker Deep Dive":
                     if not eps_df.empty:
                         st.dataframe(eps_df, use_container_width=True, hide_index=True)
 
+        # Analyst Accuracy — compare estimates to actuals
+        with st.expander("Analyst Accuracy", expanded=False):
+            _acc = compute_analyst_accuracy(
+                analysis.get("analyst_estimates", []),
+                analysis.get("income_statements", []),
+            )
+            if _acc is None:
+                st.info("Insufficient data to compare analyst estimates to actual results.")
+            else:
+                # Summary metrics
+                acc_cols = st.columns(4)
+                with acc_cols[0]:
+                    _eps_surp = _acc.get("avg_eps_surprise")
+                    if _eps_surp is not None:
+                        st.metric(
+                            "Avg EPS Surprise",
+                            f"{_eps_surp:+.1f}%",
+                            delta="Beat" if _eps_surp > 0 else "Miss",
+                            delta_color="normal" if _eps_surp > 0 else "inverse",
+                        )
+                    else:
+                        st.metric("Avg EPS Surprise", "N/A")
+                with acc_cols[1]:
+                    _beat = _acc.get("eps_beat_count", 0)
+                    _total = _acc.get("eps_total", 0)
+                    if _total > 0:
+                        st.metric("EPS Beat Rate", f"{_beat}/{_total}", delta=f"{_beat/_total*100:.0f}%")
+                    else:
+                        st.metric("EPS Beat Rate", "N/A")
+                with acc_cols[2]:
+                    _rev_surp = _acc.get("avg_rev_surprise")
+                    if _rev_surp is not None:
+                        st.metric(
+                            "Avg Revenue Surprise",
+                            f"{_rev_surp:+.1f}%",
+                            delta="Beat" if _rev_surp > 0 else "Miss",
+                            delta_color="normal" if _rev_surp > 0 else "inverse",
+                        )
+                    else:
+                        st.metric("Avg Revenue Surprise", "N/A")
+                with acc_cols[3]:
+                    _rel = _acc.get("reliability", "N/A")
+                    _rel_emoji = {"High": "🟢", "Moderate": "🟡", "Low": "🔴"}.get(_rel, "")
+                    st.metric("Estimate Reliability", f"{_rel_emoji} {_rel}")
+
+                # Warning flag for unreliable estimates
+                _abs_miss = _acc.get("avg_abs_eps_miss", 0)
+                if _abs_miss > 20:
+                    st.warning(
+                        f"⚠️ Analysts have missed EPS by an average of {_abs_miss:.0f}% — "
+                        "treat forward estimates with caution."
+                    )
+
+                # Detail table
+                if _acc["matches"]:
+                    _acc_rows = []
+                    for m in _acc["matches"]:
+                        row = {"Year": m["year"]}
+                        if m.get("est_eps") is not None:
+                            row["Est. EPS"] = f"${m['est_eps']:.2f}"
+                        else:
+                            row["Est. EPS"] = "—"
+                        if m.get("act_eps") is not None:
+                            row["Actual EPS"] = f"${m['act_eps']:.2f}"
+                        else:
+                            row["Actual EPS"] = "—"
+                        if m.get("eps_surprise") is not None:
+                            row["EPS Surprise"] = f"{m['eps_surprise']:+.1f}%"
+                        else:
+                            row["EPS Surprise"] = "—"
+                        if m.get("est_rev") is not None:
+                            row["Est. Revenue"] = f"${m['est_rev']:,.0f}"
+                        else:
+                            row["Est. Revenue"] = "—"
+                        if m.get("act_rev") is not None:
+                            row["Actual Revenue"] = f"${m['act_rev']:,.0f}"
+                        else:
+                            row["Actual Revenue"] = "—"
+                        if m.get("rev_surprise") is not None:
+                            row["Rev Surprise"] = f"{m['rev_surprise']:+.1f}%"
+                        else:
+                            row["Rev Surprise"] = "—"
+                        _acc_rows.append(row)
+                    st.dataframe(pd.DataFrame(_acc_rows), use_container_width=True, hide_index=True)
+
         # Revenue Segmentation — product and geographic breakdown
         with st.expander("Revenue Segmentation", expanded=False):
             prod_seg = fmp.get_revenue_product_segmentation(analysis["ticker"])
@@ -1733,8 +1819,72 @@ elif active_tab == "Ticker Deep Dive":
                             if ref_parts:
                                 st.caption(f"Reference: {' | '.join(ref_parts)}")
 
-                            use_multistage = st.checkbox("Use multi-stage growth (recommended)", value=True,
-                                                         help="Model growth deceleration over time.")
+                            growth_mode_cols = st.columns(2)
+                            with growth_mode_cols[0]:
+                                use_multistage = st.checkbox(
+                                    "Manual multi-stage phases",
+                                    value=True,
+                                    key="dcf_use_multistage",
+                                    help="Manually define 3 growth phases below."
+                                )
+                            with growth_mode_cols[1]:
+                                use_fade = st.checkbox(
+                                    "Auto-fade to terminal (Damodaran)",
+                                    value=False,
+                                    key="dcf_use_fade",
+                                    help=(
+                                        "Linearly fade growth from your starting rate to the terminal "
+                                        "rate between the fade-start year and year 10. In reinvestment-aware "
+                                        "mode, ROIC also fades toward WACC over the same window — modeling "
+                                        "the reality that mature companies can't earn excess returns forever. "
+                                        "Overrides manual phases when both are checked."
+                                    ),
+                                )
+                            if use_fade and use_multistage:
+                                st.caption("ℹ️ Auto-fade overrides manual phases when both are enabled.")
+                                use_multistage = False
+
+                            if use_fade:
+                                fade_start_year = st.slider(
+                                    "Fade start year",
+                                    min_value=1, max_value=9,
+                                    value=5,
+                                    key="dcf_fade_start",
+                                    help=(
+                                        "Year at which growth begins fading toward the terminal rate. "
+                                        "Lower = faster convergence (more conservative). "
+                                        "Default 5 means growth is flat for years 1-4, then fades linearly "
+                                        "to terminal by year 10."
+                                    ),
+                                )
+                            else:
+                                fade_start_year = 5
+
+                            use_reinvestment = st.checkbox(
+                                "Reinvestment-aware FCF (Damodaran)",
+                                value=False,
+                                key="dcf_use_reinvestment",
+                                help=(
+                                    "Derive FCF from NOPAT × (1 - g/ROIC) instead of using reported FCF. "
+                                    "Forces growth and reinvestment to be internally consistent: a company "
+                                    "growing 10% with ROIC of 20% must reinvest 50% of NOPAT, leaving the "
+                                    "other 50% as free cash. Best for high-growth or capital-intensive names "
+                                    "where reported FCF understates true earnings power."
+                                ),
+                            )
+
+                            use_mid_year = st.checkbox(
+                                "Mid-year discounting (sell-side convention)",
+                                value=True,
+                                key="dcf_use_mid_year",
+                                help=(
+                                    "Discount cash flows assuming they arrive on average mid-year (year - 0.5) "
+                                    "instead of year-end. Adds ~3-5% accuracy and matches standard sell-side / "
+                                    "McKinsey valuation convention. Applied consistently to projection, "
+                                    "terminal value, sensitivity table, and reverse DCF. Uncheck for the "
+                                    "older year-end convention."
+                                ),
+                            )
 
                             if use_multistage:
                                 st.markdown("**Growth Phases** *(total must equal 10 years)*")
@@ -1869,6 +2019,10 @@ elif active_tab == "Ticker Deep Dive":
                                 risk_free_rate=_risk_free_rate,
                                 annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else None,
                                 annual_share_change=user_share_change / 100.0,
+                                use_reinvestment_model=use_reinvestment,
+                                use_fade=use_fade,
+                                fade_start_year=fade_start_year,
+                                use_mid_year_discounting=use_mid_year,
                             )
                             for w in dcf_display.get("warnings", []):
                                 st.warning(w)
@@ -2253,7 +2407,11 @@ elif active_tab == "Ticker Deep Dive":
 
                     # --- Key assumptions summary ---
                     assumptions_updated = dcf_display.get("assumptions", assumptions)
-                    if use_multistage and recalc:
+                    if dcf_mode == "FCF" and assumptions_updated.get("use_fade"):
+                        _fs = assumptions_updated.get("fade_start_year", 5)
+                        _term = assumptions_updated.get("terminal_growth", 2.5)
+                        growth_desc = f"Growth: {user_growth:.2f}% → {_term:.1f}% (fade Y{_fs}-10)"
+                    elif use_multistage and recalc:
                         growth_desc = f"Growth: {p1_rate:.1f}%×{p1_years}yr → {p2_rate:.1f}%×{p2_years}yr → {p3_rate:.1f}%×{p3_years}yr"
                     else:
                         growth_desc = f"Growth: {user_growth:.2f}%"
@@ -2316,8 +2474,32 @@ elif active_tab == "Ticker Deep Dive":
                                 f"  ·  Dilution: {_fcf_share_chg_disp:+.1f}%/yr" if _fcf_share_chg_disp > 0.05 else ""
                             )
                         )
+                        _is_reinvestment = assumptions_updated.get("reinvestment_model")
+                        _is_fade = assumptions_updated.get("use_fade")
+                        _is_mid_year = assumptions_updated.get("mid_year_discounting", True)
+                        _model_parts = []
+                        if _is_reinvestment:
+                            _model_parts.append("♻️ Reinvestment-Aware")
+                        if _is_fade:
+                            _fade_y = assumptions_updated.get("fade_start_year", 5)
+                            _model_parts.append(f"📉 Fade Y{_fade_y}→10")
+                        if _is_mid_year:
+                            _model_parts.append("⏱️ Mid-Year")
+                        _model_label = " · ".join(_model_parts) if _model_parts else "Base FCF"
+                        if _is_reinvestment:
+                            _ri_nopat = assumptions_updated.get("base_nopat", 0) or 0
+                            _ri_roic = assumptions_updated.get("roic")
+                            _ri_roic_capped = assumptions_updated.get("roic_capped")
+                            _roic_text = (
+                                f"  ·  ROIC: {_ri_roic:.1f}%"
+                                + (f" (capped at {_ri_roic_capped:.1f}%)" if _ri_roic and _ri_roic_capped and abs(_ri_roic - _ri_roic_capped) > 0.01 else "")
+                                if _ri_roic is not None else ""
+                            )
+                            _base_text = f"NOPAT: ${_ri_nopat/1e9:.2f}B{_roic_text}"
+                        else:
+                            _base_text = f"Base FCF: ${base_fcf/1e9:.2f}B"
                         st.caption(
-                            f"Base FCF: ${base_fcf/1e9:.2f}B  ·  "
+                            f"{_model_label}  ·  {_base_text}  ·  "
                             f"{growth_desc}  ·  "
                             f"WACC: {user_discount:.2f}%  ·  "
                             f"Terminal: {user_terminal:.2f}%  ·  "
@@ -2406,6 +2588,7 @@ elif active_tab == "Ticker Deep Dive":
                             terminal_growth=user_terminal / 100.0,
                             annual_debt_paydown=user_debt_paydown * 1e6 if user_debt_paydown else 0.0,
                             annual_share_change=user_share_change / 100.0,
+                            use_mid_year_discounting=use_mid_year,
                         )
 
                         _rd_direction = _rd_result.get("direction")

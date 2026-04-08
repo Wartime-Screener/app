@@ -199,6 +199,120 @@ def _compute_trend(values: list[float]) -> str:
     return "volatile"
 
 
+def compute_analyst_accuracy(analyst_estimates: list[dict],
+                             income_statements: list[dict]) -> dict | None:
+    """Compare analyst consensus estimates to actual results for completed fiscal years.
+
+    Returns a dict with per-year matches, average surprise %, beat rates,
+    and an overall reliability assessment. Returns None if insufficient data.
+    """
+    if not analyst_estimates or not income_statements:
+        return None
+
+    from datetime import datetime as _dt
+
+    # Build lookup of actuals by fiscal year
+    actuals_by_year = {}
+    for stmt in income_statements:
+        d = stmt.get("date", "")
+        if not d:
+            continue
+        try:
+            year = int(d[:4])
+        except (ValueError, TypeError):
+            continue
+        actuals_by_year[year] = {
+            "eps": _safe_float(stmt.get("epsDiluted") or stmt.get("eps")),
+            "revenue": _safe_float(stmt.get("revenue")),
+        }
+
+    today = _dt.now().date()
+    matches = []
+
+    for est in analyst_estimates:
+        d = est.get("date", "")
+        if not d:
+            continue
+        try:
+            est_date = _dt.strptime(d[:10], "%Y-%m-%d").date()
+            year = est_date.year
+        except (ValueError, TypeError):
+            continue
+
+        # Only compare completed periods (estimate date has passed)
+        if est_date > today:
+            continue
+
+        if year not in actuals_by_year:
+            continue
+
+        actual = actuals_by_year[year]
+        est_eps = _safe_float(est.get("epsAvg"))
+        est_rev = _safe_float(est.get("revenueAvg"))
+        act_eps = actual["eps"]
+        act_rev = actual["revenue"]
+
+        row = {"year": year}
+
+        # EPS surprise
+        if est_eps is not None and act_eps is not None and abs(est_eps) > 0.01:
+            eps_surprise = ((act_eps - est_eps) / abs(est_eps)) * 100
+            row["est_eps"] = round(est_eps, 2)
+            row["act_eps"] = round(act_eps, 2)
+            row["eps_surprise"] = round(eps_surprise, 1)
+        else:
+            row["est_eps"] = est_eps
+            row["act_eps"] = act_eps
+            row["eps_surprise"] = None
+
+        # Revenue surprise
+        if est_rev is not None and act_rev is not None and est_rev > 0:
+            rev_surprise = ((act_rev - est_rev) / est_rev) * 100
+            row["est_rev"] = round(est_rev, 0)
+            row["act_rev"] = round(act_rev, 0)
+            row["rev_surprise"] = round(rev_surprise, 1)
+        else:
+            row["est_rev"] = est_rev
+            row["act_rev"] = act_rev
+            row["rev_surprise"] = None
+
+        matches.append(row)
+
+    if not matches:
+        return None
+
+    # Sort by year descending (most recent first)
+    matches.sort(key=lambda x: x["year"], reverse=True)
+
+    # Compute summary stats
+    eps_surprises = [m["eps_surprise"] for m in matches if m["eps_surprise"] is not None]
+    rev_surprises = [m["rev_surprise"] for m in matches if m["rev_surprise"] is not None]
+
+    result = {"matches": matches}
+
+    if eps_surprises:
+        result["avg_eps_surprise"] = round(sum(eps_surprises) / len(eps_surprises), 1)
+        result["avg_abs_eps_miss"] = round(sum(abs(s) for s in eps_surprises) / len(eps_surprises), 1)
+        result["eps_beat_count"] = sum(1 for s in eps_surprises if s > 0)
+        result["eps_total"] = len(eps_surprises)
+    if rev_surprises:
+        result["avg_rev_surprise"] = round(sum(rev_surprises) / len(rev_surprises), 1)
+        result["avg_abs_rev_miss"] = round(sum(abs(s) for s in rev_surprises) / len(rev_surprises), 1)
+        result["rev_beat_count"] = sum(1 for s in rev_surprises if s > 0)
+        result["rev_total"] = len(rev_surprises)
+
+    # Overall reliability based on average absolute EPS miss
+    avg_abs = result.get("avg_abs_eps_miss", 0)
+    if avg_abs <= 10:
+        result["reliability"] = "High"
+    elif avg_abs <= 20:
+        result["reliability"] = "Moderate"
+    else:
+        result["reliability"] = "Low"
+
+    return result
+
+
 def build_fundamentals_context(income_statements: list[dict],
                                cash_flow_statements: list[dict] | None = None,
                                balance_sheets: list[dict] | None = None,
@@ -523,6 +637,83 @@ def compute_implied_prices(metrics: dict, current_price: float | None,
     }
 
 
+def _compute_nopat_and_roic(income_statements: list[dict],
+                             balance_sheets: list[dict]) -> dict | None:
+    """
+    Compute NOPAT, invested capital, and ROIC for the reinvestment-aware DCF.
+
+    NOPAT = EBIT * (1 - effective tax rate)
+    Invested Capital = Total Equity + Total Debt - Cash
+    ROIC = NOPAT / Invested Capital (using prior-year invested capital where available)
+
+    Uses median of up to 3 most recent years for NOPAT to smooth one-off items.
+    Returns None if data is insufficient.
+    """
+    if not income_statements or not balance_sheets:
+        return None
+
+    # --- NOPAT: median of up to 3 most recent years ---
+    nopat_values = []
+    tax_rates = []
+    for stmt in income_statements[:3]:
+        ebit = _safe_float(stmt.get("operatingIncome"))
+        if ebit is None:
+            continue
+        pre_tax = _safe_float(stmt.get("incomeBeforeTax"))
+        income_tax = _safe_float(stmt.get("incomeTaxExpense"))
+        if pre_tax and pre_tax > 0 and income_tax is not None:
+            tr = max(0.0, min(0.40, income_tax / pre_tax))
+        else:
+            tr = 0.25
+        tax_rates.append(tr)
+        nopat_values.append(ebit * (1 - tr))
+
+    if not nopat_values:
+        return None
+
+    nopat_values_sorted = sorted(nopat_values)
+    base_nopat = nopat_values_sorted[len(nopat_values_sorted) // 2]
+    effective_tax_rate = sum(tax_rates) / len(tax_rates) if tax_rates else 0.25
+
+    if base_nopat <= 0:
+        return None
+
+    # --- Invested capital: use prior-year if available (standard ROIC convention) ---
+    def _invested_capital(bs: dict) -> float | None:
+        equity = _safe_float(bs.get("totalStockholdersEquity") or bs.get("totalEquity"))
+        debt = _safe_float(bs.get("totalDebt") or bs.get("longTermDebt"))
+        cash = _safe_float(bs.get("cashAndCashEquivalents")
+                           or bs.get("cashAndShortTermInvestments")) or 0.0
+        if equity is None or debt is None:
+            return None
+        ic = equity + debt - cash
+        return ic if ic > 0 else None
+
+    ic_latest = _invested_capital(balance_sheets[0])
+    ic_prior = _invested_capital(balance_sheets[1]) if len(balance_sheets) > 1 else None
+
+    # Standard convention: use average of beginning + ending invested capital
+    if ic_latest and ic_prior:
+        invested_capital = (ic_latest + ic_prior) / 2
+    elif ic_latest:
+        invested_capital = ic_latest
+    else:
+        return None
+
+    roic = base_nopat / invested_capital
+    # Sanity clamp: ROIC above 60% is almost certainly a measurement artifact
+    # (e.g., asset-light companies with negligible invested capital)
+    roic_capped = min(roic, 0.60)
+
+    return {
+        "base_nopat": base_nopat,
+        "invested_capital": invested_capital,
+        "roic": roic,
+        "roic_capped": roic_capped,
+        "effective_tax_rate": effective_tax_rate,
+    }
+
+
 def compute_dcf_valuation(cash_flow_statements: list[dict],
                            income_statements: list[dict],
                            profile: dict,
@@ -535,7 +726,11 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                            growth_stages: list[dict] | None = None,
                            risk_free_rate: float | None = None,
                            annual_debt_paydown: float | None = None,
-                           annual_share_change: float | None = None) -> dict:
+                           annual_share_change: float | None = None,
+                           use_reinvestment_model: bool = False,
+                           use_fade: bool = False,
+                           fade_start_year: int = 5,
+                           use_mid_year_discounting: bool = True) -> dict:
     """
     Discounted Cash Flow valuation — "what has to be true" model.
 
@@ -566,32 +761,52 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         if fcf is not None:
             fcf_values.append(fcf)
 
-    if len(fcf_values) < 2:
+    # --- Reinvestment-aware mode (Damodaran): derive FCF from NOPAT × (1 - g/ROIC) ---
+    # Computed early so we can fall back gracefully if it fails, and so projections
+    # use NOPAT compounding instead of FCF compounding when enabled.
+    reinvestment_info = None
+    if use_reinvestment_model and balance_sheets:
+        reinvestment_info = _compute_nopat_and_roic(income_statements, balance_sheets)
+        if reinvestment_info is None:
+            warnings.append(
+                "Reinvestment-aware mode requested but NOPAT/ROIC could not be computed "
+                "-- falling back to reported FCF base"
+            )
+
+    if len(fcf_values) < 2 and not reinvestment_info:
         return {"dcf_price": None, "warnings": ["Insufficient FCF history for DCF"],
                 "assumptions": {}, "has_data": False}
 
-    # Use weighted median of up to 5 years as base (recent years weighted more heavily)
-    # Weights: most recent = 5, next = 4, ..., oldest = 1
-    n = len(fcf_values)
-    weights = list(range(n, 0, -1))  # e.g. [5, 4, 3, 2, 1] for 5 years
-    # Weighted median: sort by value, pick the value where cumulative weight crosses 50%
-    paired = sorted(zip(fcf_values, weights), key=lambda x: x[0])
-    total_weight = sum(weights)
-    cumulative = 0
-    base_fcf = paired[len(paired) // 2][0]  # fallback to simple median
-    for val, w in paired:
-        cumulative += w
-        if cumulative >= total_weight / 2:
-            base_fcf = val
-            break
+    if fcf_values:
+        # Use weighted median of up to 5 years as base (recent years weighted more heavily)
+        # Weights: most recent = 5, next = 4, ..., oldest = 1
+        n = len(fcf_values)
+        weights = list(range(n, 0, -1))  # e.g. [5, 4, 3, 2, 1] for 5 years
+        # Weighted median: sort by value, pick the value where cumulative weight crosses 50%
+        paired = sorted(zip(fcf_values, weights), key=lambda x: x[0])
+        total_weight = sum(weights)
+        cumulative = 0
+        base_fcf = paired[len(paired) // 2][0]  # fallback to simple median
+        for val, w in paired:
+            cumulative += w
+            if cumulative >= total_weight / 2:
+                base_fcf = val
+                break
 
-    if base_fcf <= 0:
-        # Fallback: try simple mean of all available years
-        base_fcf = np.mean(fcf_values)
         if base_fcf <= 0:
-            return {"dcf_price": None, "warnings": ["Negative weighted median FCF — DCF not applicable"],
-                    "assumptions": {}, "has_data": False}
-        warnings.append("Weighted median FCF negative — using mean of all years as base")
+            # Fallback: try simple mean of all available years
+            base_fcf = np.mean(fcf_values)
+            if base_fcf <= 0 and not reinvestment_info:
+                return {"dcf_price": None, "warnings": ["Negative weighted median FCF — DCF not applicable"],
+                        "assumptions": {}, "has_data": False}
+            if base_fcf <= 0:
+                # Reinvestment mode will replace base_fcf using NOPAT below
+                base_fcf = reinvestment_info["base_nopat"]
+            else:
+                warnings.append("Weighted median FCF negative — using mean of all years as base")
+    else:
+        # No FCF history at all -- only reachable in reinvestment mode
+        base_fcf = reinvestment_info["base_nopat"]
 
     # --- Shares outstanding ---
     shares = None
@@ -776,42 +991,124 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         warnings.append("Discount rate must exceed terminal growth — adjusting terminal growth down")
         terminal_growth = discount_rate - 0.01
 
-    # --- Project FCFs (multi-stage or single-stage) ---
+    # --- Build per-year growth + ROIC schedules ---
+    # Single source of truth used by projection loop AND sensitivity table.
+    # Modes (in order of precedence):
+    #   1. growth_stages (manual multi-stage) — expanded year by year
+    #   2. use_fade — linear fade from growth_rate to terminal_growth between
+    #      fade_start_year and projection_years (and ROIC fades to WACC over the
+    #      same window when in reinvestment mode — mature companies can't earn
+    #      excess returns forever).
+    #   3. flat growth_rate
+    base_roic_for_fade = reinvestment_info["roic_capped"] if reinvestment_info else None
+
+    def _build_growth_schedule(initial_g: float) -> list[float]:
+        """Returns a list of length projection_years with the growth rate per year."""
+        schedule = []
+        if growth_stages:
+            for stage in growth_stages:
+                for _ in range(stage["years"]):
+                    if len(schedule) < projection_years:
+                        schedule.append(stage["rate"])
+            # Pad if stages don't fill the horizon
+            last_rate = growth_stages[-1]["rate"] if growth_stages else initial_g
+            while len(schedule) < projection_years:
+                schedule.append(last_rate)
+        elif use_fade:
+            fs = max(1, min(int(fade_start_year), projection_years))
+            for y in range(1, projection_years + 1):
+                if y < fs:
+                    schedule.append(initial_g)
+                elif projection_years == fs:
+                    schedule.append(terminal_growth)
+                else:
+                    t = (y - fs) / (projection_years - fs)
+                    schedule.append(initial_g + (terminal_growth - initial_g) * t)
+        else:
+            schedule = [initial_g] * projection_years
+        return schedule
+
+    def _build_roic_schedule(initial_roic: float) -> list[float]:
+        """ROIC fade schedule. ROIC fades to WACC (discount_rate) when fade is on."""
+        if not use_fade:
+            return [initial_roic] * projection_years
+        fs = max(1, min(int(fade_start_year), projection_years))
+        schedule = []
+        for y in range(1, projection_years + 1):
+            if y < fs:
+                schedule.append(initial_roic)
+            elif projection_years == fs:
+                schedule.append(discount_rate)
+            else:
+                t = (y - fs) / (projection_years - fs)
+                schedule.append(initial_roic + (discount_rate - initial_roic) * t)
+        return schedule
+
+    year_growth_rates = _build_growth_schedule(growth_rate)
+    year_roics = _build_roic_schedule(base_roic_for_fade) if reinvestment_info else None
+
+    # Mid-year discounting convention: cash flows arrive throughout the year on
+    # average, not at year-end. Discount factor uses (year - 0.5) instead of year.
+    # Standard sell-side practice; adds ~3-5% accuracy vs year-end convention.
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
+
+    # --- Project FCFs ---
+    # In reinvestment-aware mode, FCF = NOPAT × (1 - g/ROIC), where NOPAT compounds
+    # at the per-year growth rate. This makes growth and reinvestment internally
+    # consistent: you can't grow faster than your ROIC supports without burning cash.
     projected_fcfs = []
-    fcf = base_fcf
-    if growth_stages:
-        # Multi-stage: each stage has {"rate": float, "years": int}
-        year_counter = 1
-        for stage in growth_stages:
-            stage_rate = stage["rate"]
-            stage_years = stage["years"]
-            for _ in range(stage_years):
-                if year_counter > projection_years:
-                    break
-                fcf = fcf * (1 + stage_rate)
-                pv = fcf / (1 + discount_rate) ** year_counter
-                projected_fcfs.append({
-                    "year": year_counter,
-                    "fcf": round(fcf, 0),
-                    "present_value": round(pv, 0),
-                    "stage_rate": round(stage_rate * 100, 1),
-                })
-                year_counter += 1
-    else:
-        # Single-stage (backward compatible)
+    if reinvestment_info:
+        nopat = reinvestment_info["base_nopat"]
+        flagged_growth_above_roic = False
         for year in range(1, projection_years + 1):
-            fcf = fcf * (1 + growth_rate)
-            pv = fcf / (1 + discount_rate) ** year
+            g = year_growth_rates[year - 1]
+            roic_y = year_roics[year - 1]
+            if g > roic_y and not flagged_growth_above_roic:
+                warnings.append(
+                    f"Growth rate ({g*100:.1f}%) exceeds ROIC ({roic_y*100:.1f}%) in year {year} "
+                    "-- reinvestment capped at 100% (FCF=0 for affected years)"
+                )
+                flagged_growth_above_roic = True
+            nopat = nopat * (1 + g)
+            rr = max(0.0, min(1.0, g / roic_y)) if roic_y > 0 else 1.0
+            fcf_t = nopat * (1 - rr)
+            pv = fcf_t / (1 + discount_rate) ** (year - disc_offset)
+            projected_fcfs.append({
+                "year": year,
+                "fcf": round(fcf_t, 0),
+                "present_value": round(pv, 0),
+                "stage_rate": round(g * 100, 1),
+                "nopat": round(nopat, 0),
+                "reinvestment_rate": round(rr * 100, 1),
+                "roic": round(roic_y * 100, 1),
+            })
+        final_nopat = nopat
+    else:
+        fcf = base_fcf
+        for year in range(1, projection_years + 1):
+            g = year_growth_rates[year - 1]
+            fcf = fcf * (1 + g)
+            pv = fcf / (1 + discount_rate) ** (year - disc_offset)
             projected_fcfs.append({
                 "year": year,
                 "fcf": round(fcf, 0),
                 "present_value": round(pv, 0),
+                "stage_rate": round(g * 100, 1),
             })
 
     # --- Terminal value ---
-    terminal_fcf = projected_fcfs[-1]["fcf"] * (1 + terminal_growth)
+    if reinvestment_info:
+        # When fade is on, ROIC has converged toward WACC by year 10 — terminal
+        # uses that converged ROIC, so reinvestment rate at terminal = tg/WACC.
+        terminal_roic = year_roics[-1]
+        terminal_nopat = final_nopat * (1 + terminal_growth)
+        terminal_rr = max(0.0, min(1.0, terminal_growth / terminal_roic)) if terminal_roic > 0 else 1.0
+        terminal_fcf = terminal_nopat * (1 - terminal_rr)
+    else:
+        terminal_fcf = projected_fcfs[-1]["fcf"] * (1 + terminal_growth)
     terminal_value = terminal_fcf / (discount_rate - terminal_growth)
-    terminal_pv = terminal_value / (1 + discount_rate) ** projection_years
+    # Discount terminal back using same mid-year convention as explicit period
+    terminal_pv = terminal_value / (1 + discount_rate) ** (projection_years - disc_offset)
 
     # --- Intrinsic value ---
     sum_pv_fcfs = sum(p["present_value"] for p in projected_fcfs)
@@ -843,6 +1140,14 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                 "wacc_breakdown": wacc_breakdown,
                 "annual_share_change": round(resolved_share_change * 100, 2),
                 "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
+                "reinvestment_model": bool(reinvestment_info),
+                "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
+                "roic": round(reinvestment_info["roic"] * 100, 2) if reinvestment_info else None,
+                "roic_capped": round(reinvestment_info["roic_capped"] * 100, 2) if reinvestment_info else None,
+                "invested_capital": round(reinvestment_info["invested_capital"], 0) if reinvestment_info else None,
+                "use_fade": bool(use_fade),
+                "fade_start_year": int(fade_start_year) if use_fade else None,
+                "mid_year_discounting": bool(use_mid_year_discounting),
             },
             "projected_fcfs": projected_fcfs,
             "sensitivity": [],
@@ -876,19 +1181,49 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
     sensitivity = []
     for g in growth_steps:
         row = {"growth_rate": round(g * 100, 1)}
+        # Per-year growth schedule for this cell — honors fade if enabled
+        cell_growth_schedule = _build_growth_schedule(g)
         for d in discount_steps:
             if d <= terminal_growth + 0.005:  # discount must exceed terminal growth
                 row[f"{d*100:.1f}%"] = "N/A"
                 continue
             # Quick DCF calc for this combo
-            f = base_fcf
             pv_sum = 0
-            for yr in range(1, projection_years + 1):
-                f = f * (1 + g)
-                pv_sum += f / (1 + d) ** yr
-            t_fcf = f * (1 + terminal_growth)
+            if reinvestment_info:
+                base_roic_s = reinvestment_info["roic_capped"]
+                # ROIC fades to *this cell's* discount rate, not the base WACC
+                if use_fade:
+                    fs = max(1, min(int(fade_start_year), projection_years))
+                    cell_roic_schedule = []
+                    for yr in range(1, projection_years + 1):
+                        if yr < fs:
+                            cell_roic_schedule.append(base_roic_s)
+                        elif projection_years == fs:
+                            cell_roic_schedule.append(d)
+                        else:
+                            t = (yr - fs) / (projection_years - fs)
+                            cell_roic_schedule.append(base_roic_s + (d - base_roic_s) * t)
+                else:
+                    cell_roic_schedule = [base_roic_s] * projection_years
+                n_t = reinvestment_info["base_nopat"]
+                for yr in range(1, projection_years + 1):
+                    g_yr = cell_growth_schedule[yr - 1]
+                    roic_yr = cell_roic_schedule[yr - 1]
+                    rr_yr = max(0.0, min(1.0, g_yr / roic_yr)) if roic_yr > 0 else 1.0
+                    n_t = n_t * (1 + g_yr)
+                    f_t = n_t * (1 - rr_yr)
+                    pv_sum += f_t / (1 + d) ** (yr - disc_offset)
+                terminal_roic_s = cell_roic_schedule[-1]
+                t_rr = max(0.0, min(1.0, terminal_growth / terminal_roic_s)) if terminal_roic_s > 0 else 1.0
+                t_fcf = n_t * (1 + terminal_growth) * (1 - t_rr)
+            else:
+                f = base_fcf
+                for yr in range(1, projection_years + 1):
+                    f = f * (1 + cell_growth_schedule[yr - 1])
+                    pv_sum += f / (1 + d) ** (yr - disc_offset)
+                t_fcf = f * (1 + terminal_growth)
             t_val = t_fcf / (d - terminal_growth) if d > terminal_growth else 0
-            t_pv = t_val / (1 + d) ** projection_years
+            t_pv = t_val / (1 + d) ** (projection_years - disc_offset)
             ev = pv_sum + t_pv
             eq = ev - net_debt_at_terminal
             price = max(eq, 0) / terminal_shares
@@ -919,6 +1254,16 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             "annual_share_change": round(resolved_share_change * 100, 2),
             "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
             "terminal_shares": round(terminal_shares, 0),
+            "reinvestment_model": bool(reinvestment_info),
+            "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
+            "roic": round(reinvestment_info["roic"] * 100, 2) if reinvestment_info else None,
+            "roic_capped": round(reinvestment_info["roic_capped"] * 100, 2) if reinvestment_info else None,
+            "invested_capital": round(reinvestment_info["invested_capital"], 0) if reinvestment_info else None,
+            "use_fade": bool(use_fade),
+            "fade_start_year": int(fade_start_year) if use_fade else None,
+            "year_growth_rates": [round(g * 100, 2) for g in year_growth_rates],
+            "year_roics": [round(r * 100, 2) for r in year_roics] if year_roics else None,
+            "mid_year_discounting": bool(use_mid_year_discounting),
         },
         "projected_fcfs": projected_fcfs,
         "terminal_value": round(terminal_value, 0),
@@ -943,6 +1288,7 @@ def run_dcf_monte_carlo(
     growth_std: float | None = None,
     discount_std: float | None = None,
     terminal_std: float | None = None,
+    use_mid_year_discounting: bool = True,
 ) -> dict:
     """
     Monte Carlo simulation over DCF assumptions.
@@ -993,17 +1339,19 @@ def run_dcf_monte_carlo(
     mask = discount_samples <= terminal_samples + 0.005
     discount_samples[mask] = terminal_samples[mask] + 0.01
 
-    # Vectorised DCF — project FCFs and discount
+    # Vectorised DCF — project FCFs and discount (with mid-year convention)
     # Shape: (n_simulations, projection_years)
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
     years = np.arange(1, projection_years + 1)
+    discount_exponents = years - disc_offset                         # (T,)
     growth_factors = (1 + growth_samples[:, None]) ** years          # (N, T)
-    discount_factors = (1 + discount_samples[:, None]) ** years      # (N, T)
+    discount_factors = (1 + discount_samples[:, None]) ** discount_exponents  # (N, T)
 
     fcf_projections = base_fcf * growth_factors                      # (N, T)
     pv_fcfs = fcf_projections / discount_factors                     # (N, T)
     sum_pv = pv_fcfs.sum(axis=1)                                     # (N,)
 
-    # Terminal value
+    # Terminal value (also uses mid-year offset for terminal discount)
     terminal_fcf = fcf_projections[:, -1] * (1 + terminal_samples)
     terminal_value = terminal_fcf / (discount_samples - terminal_samples)
     terminal_pv = terminal_value / discount_factors[:, -1]
@@ -1066,7 +1414,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                                    risk_free_rate: float | None = None,
                                    annual_debt_paydown: float | None = None,
                                    use_margin_reversion: bool = True,
-                                   annual_share_change: float | None = None) -> dict:
+                                   annual_share_change: float | None = None,
+                                   use_mid_year_discounting: bool = True) -> dict:
     """
     Revenue-based DCF — derives FCF from projected revenue × target FCF margin.
 
@@ -1276,6 +1625,8 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     # --- Project revenue → FCF ---
     projected_fcfs = []
     rev = base_revenue
+    # Mid-year discounting: cash flows arrive on average mid-year, not year-end.
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
 
     def _margin_for_year(year: int) -> float:
         """Linearly interpolate from starting_fcf_margin → target_fcf_margin over projection_years."""
@@ -1295,7 +1646,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 rev = rev * (1 + stage_rate)
                 margin = _margin_for_year(year_counter)
                 fcf = rev * margin
-                pv = fcf / (1 + discount_rate) ** year_counter
+                pv = fcf / (1 + discount_rate) ** (year_counter - disc_offset)
                 projected_fcfs.append({
                     "year": year_counter,
                     "revenue": round(rev, 0),
@@ -1310,7 +1661,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             rev = rev * (1 + revenue_growth)
             margin = _margin_for_year(year)
             fcf = rev * margin
-            pv = fcf / (1 + discount_rate) ** year
+            pv = fcf / (1 + discount_rate) ** (year - disc_offset)
             projected_fcfs.append({
                 "year": year,
                 "revenue": round(rev, 0),
@@ -1322,7 +1673,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
     # --- Terminal value ---
     terminal_fcf = projected_fcfs[-1]["fcf"] * (1 + terminal_growth)
     terminal_value = terminal_fcf / (discount_rate - terminal_growth)
-    terminal_pv = terminal_value / (1 + discount_rate) ** projection_years
+    terminal_pv = terminal_value / (1 + discount_rate) ** (projection_years - disc_offset)
 
     # --- Intrinsic value ---
     sum_pv_fcfs = sum(p["present_value"] for p in projected_fcfs)
@@ -1355,6 +1706,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 "wacc_breakdown": wacc_breakdown,
                 "annual_share_change": round(resolved_share_change_r * 100, 2),
                 "hist_share_change": round(hist_share_change_r * 100, 1) if hist_share_change_r is not None else None,
+                "mid_year_discounting": bool(use_mid_year_discounting),
             },
             "projected_fcfs": projected_fcfs,
             "sensitivity": [],
@@ -1395,10 +1747,10 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 r = r * (1 + g)
                 m = _margin_for_year(yr)
                 f = r * m
-                pv_sum += f / (1 + d) ** yr
+                pv_sum += f / (1 + d) ** (yr - disc_offset)
             t_fcf = (r * target_fcf_margin) * (1 + terminal_growth)
             t_val = t_fcf / (d - terminal_growth) if d > terminal_growth else 0
-            t_pv = t_val / (1 + d) ** projection_years
+            t_pv = t_val / (1 + d) ** (projection_years - disc_offset)
             ev = pv_sum + t_pv
             eq = ev - net_debt_at_terminal
             price = max(eq, 0) / terminal_shares_r
@@ -1455,6 +1807,7 @@ def compute_reverse_dcf(
     projection_years: int = 10,
     annual_debt_paydown: float = 0.0,
     annual_share_change: float = 0.0,
+    use_mid_year_discounting: bool = True,
 ) -> dict:
     """
     Reverse DCF: solve for the implied flat FCF growth rate that makes the DCF
@@ -1482,15 +1835,17 @@ def compute_reverse_dcf(
     # Enterprise value implied by current price
     target_ev = target_equity_value + net_debt_at_terminal
 
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
+
     def _ev_at_growth(g: float) -> float:
         fcf = base_fcf
         total_pv = 0.0
         for year in range(1, projection_years + 1):
             fcf = fcf * (1 + g)
-            total_pv += fcf / (1 + discount_rate) ** year
+            total_pv += fcf / (1 + discount_rate) ** (year - disc_offset)
         terminal_fcf = fcf * (1 + terminal_growth)
         tv = terminal_fcf / (discount_rate - terminal_growth)
-        tv_pv = tv / (1 + discount_rate) ** projection_years
+        tv_pv = tv / (1 + discount_rate) ** (projection_years - disc_offset)
         return total_pv + tv_pv
 
     lo, hi = -0.30, 1.00  # search from -30% to +100% annual FCF growth
@@ -1549,6 +1904,7 @@ def compute_reverse_revenue_dcf(
     projection_years: int = 10,
     annual_debt_paydown: float = 0.0,
     annual_share_change: float = 0.0,
+    use_mid_year_discounting: bool = True,
 ) -> dict:
     """
     Reverse Revenue DCF: solve for the implied annual revenue growth rate that
@@ -1582,16 +1938,18 @@ def compute_reverse_revenue_dcf(
     target_equity_value = current_price * terminal_shares_rev
     target_ev = target_equity_value + net_debt_at_terminal
 
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
+
     def _ev_at_rev_growth(g: float) -> float:
         revenue = base_revenue
         total_pv = 0.0
         for year in range(1, projection_years + 1):
             revenue = revenue * (1 + g)
             fcf = revenue * fcf_margin
-            total_pv += fcf / (1 + discount_rate) ** year
+            total_pv += fcf / (1 + discount_rate) ** (year - disc_offset)
         terminal_fcf = revenue * fcf_margin * (1 + terminal_growth)
         tv = terminal_fcf / (discount_rate - terminal_growth)
-        tv_pv = tv / (1 + discount_rate) ** projection_years
+        tv_pv = tv / (1 + discount_rate) ** (projection_years - disc_offset)
         return total_pv + tv_pv
 
     lo, hi = -0.30, 1.00
@@ -1674,6 +2032,7 @@ def compute_earnings_dcf_valuation(
     projection_years: int = 10,
     risk_free_rate: float | None = None,
     growth_stages: list[dict] | None = None,
+    use_mid_year_discounting: bool = True,
 ) -> dict:
     """
     Earnings Power DCF — projects diluted EPS, discounts annual dividends
@@ -1839,6 +2198,8 @@ def compute_earnings_dcf_valuation(
     terminal_pe = terminal_pe_override if terminal_pe_override is not None else default_terminal_pe
 
     # ---- Project EPS (multi-stage or flat) ----------------------------------
+    # Mid-year discounting for the dividend stream.
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
     projected: list[dict] = []
     eps = base_eps
     if growth_stages:
@@ -1853,7 +2214,7 @@ def compute_earnings_dcf_valuation(
                 projected.append({
                     "year": yr, "eps": round(eps, 4),
                     "dividend": round(div, 4),
-                    "present_value": round(div / (1 + discount_rate) ** yr, 4),
+                    "present_value": round(div / (1 + discount_rate) ** (yr - disc_offset), 4),
                     "stage_rate": round(r * 100, 1),
                 })
                 yr += 1
@@ -1864,13 +2225,13 @@ def compute_earnings_dcf_valuation(
             projected.append({
                 "year": yr, "eps": round(eps, 4),
                 "dividend": round(div, 4),
-                "present_value": round(div / (1 + discount_rate) ** yr, 4),
+                "present_value": round(div / (1 + discount_rate) ** (yr - disc_offset), 4),
             })
 
     # ---- Terminal value (P/E on terminal EPS) --------------------------------
     terminal_eps = projected[-1]["eps"]
     terminal_value_ps = terminal_eps * terminal_pe          # per share
-    terminal_pv = terminal_value_ps / (1 + discount_rate) ** projection_years
+    terminal_pv = terminal_value_ps / (1 + discount_rate) ** (projection_years - disc_offset)
 
     # ---- Intrinsic value -----------------------------------------------------
     sum_pv_divs = sum(p["present_value"] for p in projected)
@@ -1891,8 +2252,8 @@ def compute_earnings_dcf_valuation(
             _pv2  = 0.0
             for yr2 in range(1, projection_years + 1):
                 _eps2 = _eps2 * (1 + g)
-                _pv2 += (_eps2 * payout_ratio) / (1 + discount_rate) ** yr2
-            _tv2   = (_eps2 * pe) / (1 + discount_rate) ** projection_years
+                _pv2 += (_eps2 * payout_ratio) / (1 + discount_rate) ** (yr2 - disc_offset)
+            _tv2   = (_eps2 * pe) / (1 + discount_rate) ** (projection_years - disc_offset)
             _price2 = round(_pv2 + _tv2, 2)
             row[f"{pe}x"] = _price2 if _price2 > 0 else "N/A"
         sensitivity.append(row)
@@ -1924,6 +2285,7 @@ def compute_earnings_dcf_valuation(
             "hist_eps_growth": round(hist_eps_growth * 100, 2) if hist_eps_growth is not None else None,
             "analyst_eps_growth": round(analyst_eps_growth * 100, 2) if analyst_eps_growth is not None else None,
             "analyst_num_analysts": analyst_num,
+            "mid_year_discounting": bool(use_mid_year_discounting),
         },
     }
 
@@ -1935,6 +2297,7 @@ def compute_reverse_earnings_dcf(
     discount_rate: float,
     terminal_pe: float,
     projection_years: int = 10,
+    use_mid_year_discounting: bool = True,
 ) -> dict:
     """
     Reverse Earnings DCF: solve for the implied flat EPS growth rate that
@@ -1945,13 +2308,15 @@ def compute_reverse_earnings_dcf(
         return {"implied_growth": None, "direction": "error",
                 "message": "Insufficient data for Reverse Earnings DCF"}
 
+    disc_offset = 0.5 if use_mid_year_discounting else 0.0
+
     def _price_at_growth(g: float) -> float:
         eps = base_eps
         pv_divs = 0.0
         for yr in range(1, projection_years + 1):
             eps = eps * (1 + g)
-            pv_divs += (eps * payout_ratio) / (1 + discount_rate) ** yr
-        terminal_pv = (eps * terminal_pe) / (1 + discount_rate) ** projection_years
+            pv_divs += (eps * payout_ratio) / (1 + discount_rate) ** (yr - disc_offset)
+        terminal_pv = (eps * terminal_pe) / (1 + discount_rate) ** (projection_years - disc_offset)
         return pv_divs + terminal_pv
 
     lo, hi = -0.20, 0.50
@@ -2142,7 +2507,7 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
     )
 
     # Fetch analyst estimates for DCF growth rate context
-    analyst_estimates = fmp_client.get_analyst_estimates(ticker, period="annual", limit=5)
+    analyst_estimates = fmp_client.get_analyst_estimates(ticker, period="annual", limit=15)
 
     # DCF valuation (default assumptions — UI lets user override via sliders)
     dcf_valuation = compute_dcf_valuation(
