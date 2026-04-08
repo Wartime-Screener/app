@@ -11,6 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
+from src.quality_scores import (
+    compute_piotroski_f_score,
+    compute_altman_z_score,
+    compute_beneish_m_score,
+)
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -2728,6 +2734,15 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         elif _cal_year:
             _latest_filing_period = f"FY {_cal_year}"
 
+    # Forensic-accounting quality scores: Piotroski (improvement), Altman
+    # (solvency), Beneish (manipulation). All three handle missing data and
+    # sector applicability internally.
+    _sector = profile.get("sector", "")
+    _industry = profile.get("industry", "")
+    piotroski = compute_piotroski_f_score(income, balance_sheet, cash_flow, _sector, _industry)
+    altman = compute_altman_z_score(income, balance_sheet, profile, _sector, _industry)
+    beneish = compute_beneish_m_score(income, balance_sheet, cash_flow, _sector, _industry)
+
     return {
         "ticker": ticker,
         "company_name": company_name,
@@ -2747,6 +2762,9 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         "analyst_estimates": analyst_estimates,
         "latest_filing_date": _latest_filing_date,
         "latest_filing_period": _latest_filing_period,
+        "piotroski_f_score": piotroski,
+        "altman_z_score": altman,
+        "beneish_m_score": beneish,
     }
 
 
