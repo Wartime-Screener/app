@@ -39,7 +39,7 @@ from src.ratio_analyzer import (
     run_dcf_monte_carlo, compute_reverse_dcf, compute_reverse_revenue_dcf,
     compute_earnings_dcf_valuation, compute_reverse_earnings_dcf,
     infer_dcf_model, _load_scoring_config,
-    compute_analyst_accuracy,
+    compute_analyst_accuracy, reconcile_capital_actions,
 )
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
@@ -2547,6 +2547,145 @@ elif active_tab == "Ticker Deep Dive":
                             "🟡 Yellow = within ±30% of current (fairly valued)  ·  "
                             "🔴 Red = implied price < 90% of current (overvalued)"
                         )
+
+                    # --- EDGAR capital actions verification (FCF mode only) ---
+                    # Cross-check the FMP balance-sheet auto-paydown against
+                    # SEC EDGAR XBRL cash flow statement tags. Lazy: only fetched
+                    # when the user expands the section, so it doesn't slow down
+                    # normal DCF flow. US filers only — gracefully reports
+                    # "unavailable" for foreign issuers.
+                    if dcf_mode == "FCF":
+                        with st.expander("🔍 Verify Capital Actions with SEC EDGAR (US filers only)", expanded=False):
+                            st.caption(
+                                "Compares the auto-paydown estimate (derived from year-over-year "
+                                "balance sheet differencing) against EDGAR's XBRL cash flow statement "
+                                "tags. Balance sheet differencing has a structural blind spot for "
+                                "**refinancing activity** — a company that repays $5B and issues $5B "
+                                "of new debt shows zero net change. EDGAR catches this. Foreign filers "
+                                "(20-F with IFRS tags) are not supported."
+                            )
+                            try:
+                                _ca_assumptions = dcf_display.get("assumptions", {})
+                                _ca_fmp_paydown = _ca_assumptions.get("auto_debt_paydown")
+                                _ca_fmp_share_chg = _ca_assumptions.get("hist_share_change")
+                                _ca_shares = _ca_assumptions.get("shares_outstanding")
+                                _ca_fmp_share_dec = (_ca_fmp_share_chg / 100.0) if _ca_fmp_share_chg is not None else None
+
+                                _edgar_cap = edgar.get_capital_actions(ticker, years=5)
+                                _recon = reconcile_capital_actions(
+                                    edgar_data=_edgar_cap,
+                                    fmp_auto_debt_paydown=_ca_fmp_paydown,
+                                    fmp_hist_share_change_pct=_ca_fmp_share_dec,
+                                    shares_outstanding=_ca_shares,
+                                )
+
+                                if not _recon["available"]:
+                                    st.info(f"⚠️ {_recon.get('note', 'EDGAR data not available for this ticker.')}")
+                                else:
+                                    _badge_colors = {
+                                        "agree": ("✅", "#4ade80", "Methods Agree"),
+                                        "caution": ("⚠️", "#fbbf24", "Methods Diverge"),
+                                        "major": ("🔴", "#f87171", "Major Discrepancy"),
+                                        "mismatch": ("🔴", "#f87171", "Sign Mismatch"),
+                                        "edgar_only": ("ℹ️", "#60a5fa", "EDGAR Only"),
+                                    }
+
+                                    # ---- Debt paydown comparison ----
+                                    _dp = _recon.get("debt_paydown")
+                                    if _dp:
+                                        st.markdown("**Annual Debt Paydown** *(positive = paying down, negative = net issuing)*")
+                                        _dp_badge = _badge_colors.get(_dp["agreement"], ("•", "#999", _dp["agreement"]))
+                                        _dp_cols = st.columns(3)
+                                        with _dp_cols[0]:
+                                            _fmp_val = _dp.get("fmp")
+                                            st.metric(
+                                                "FMP (balance sheet)",
+                                                f"${_fmp_val/1e9:+.2f}B/yr" if _fmp_val is not None else "N/A",
+                                                help="Auto-estimated from year-over-year totalDebt changes."
+                                            )
+                                        with _dp_cols[1]:
+                                            st.metric(
+                                                "EDGAR (cash flow)",
+                                                f"${_dp['edgar']/1e9:+.2f}B/yr",
+                                                help="RepaymentsOfLongTermDebt − ProceedsFromIssuanceOfLongTermDebt, 5yr avg."
+                                            )
+                                        with _dp_cols[2]:
+                                            _dp_delta = _dp.get("delta_pct")
+                                            st.metric(
+                                                "Delta",
+                                                f"{_dp_delta:+.0f}%" if _dp_delta is not None else "—",
+                                                help="EDGAR vs FMP, scaled to the larger of the two."
+                                            )
+                                        st.markdown(
+                                            f"<div style='padding:8px 12px; border-left: 3px solid {_dp_badge[1]}; "
+                                            f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 6px 0'>"
+                                            f"<strong style='color:{_dp_badge[1]}'>{_dp_badge[0]} {_dp_badge[2]}</strong> "
+                                            f"<span style='font-size:0.9em'>— {_dp['note']}</span>"
+                                            f"</div>",
+                                            unsafe_allow_html=True,
+                                        )
+
+                                    # ---- Buyback comparison ----
+                                    _bb = _recon.get("buybacks")
+                                    if _bb:
+                                        st.markdown("**Annual Buybacks**")
+                                        _bb_badge = _badge_colors.get(_bb.get("agreement"), ("•", "#999", "—"))
+                                        _bb_cols = st.columns(3)
+                                        with _bb_cols[0]:
+                                            _bb_pct = _bb.get("fmp_share_change_pct")
+                                            st.metric(
+                                                "FMP (share count Δ)",
+                                                f"{_bb_pct*100:+.1f}%/yr" if _bb_pct is not None else "N/A",
+                                                help="Negative = shrinking (buybacks), Positive = growing (dilution)."
+                                            )
+                                        with _bb_cols[1]:
+                                            st.metric(
+                                                "EDGAR (cash spent)",
+                                                f"${_bb['edgar_dollars']/1e9:.2f}B/yr",
+                                                help="PaymentsForRepurchaseOfCommonStock, 5yr avg."
+                                            )
+                                        with _bb_cols[2]:
+                                            # Implied % from EDGAR using current price
+                                            if _ca_shares and _dcf_current_price and _bb["edgar_dollars"]:
+                                                _impl_pct = (_bb["edgar_dollars"] / (_ca_shares * _dcf_current_price)) * 100
+                                                st.metric(
+                                                    "EDGAR implied %",
+                                                    f"{_impl_pct:.1f}%",
+                                                    help="EDGAR $ ÷ (shares × current price). Approximate buyback yield."
+                                                )
+                                            else:
+                                                st.metric("EDGAR implied %", "—")
+                                        if _bb.get("note"):
+                                            st.markdown(
+                                                f"<div style='padding:8px 12px; border-left: 3px solid {_bb_badge[1]}; "
+                                                f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 6px 0'>"
+                                                f"<strong style='color:{_bb_badge[1]}'>{_bb_badge[0]} {_bb_badge[2]}</strong> "
+                                                f"<span style='font-size:0.9em'>— {_bb['note']}</span>"
+                                                f"</div>",
+                                                unsafe_allow_html=True,
+                                            )
+
+                                    # ---- Per-year detail + source tags ----
+                                    _ann = _edgar_cap.get("annual_data", [])
+                                    if _ann:
+                                        st.markdown("**Per-year detail (from EDGAR)**")
+                                        _detail_rows = []
+                                        for row in _ann:
+                                            _detail_rows.append({
+                                                "Fiscal Year": row["fiscal_year"],
+                                                "Buybacks ($B)": f"{row['buybacks']/1e9:.2f}" if row["buybacks"] is not None else "—",
+                                                "Debt Repaid ($B)": f"{row['debt_repayments']/1e9:.2f}" if row["debt_repayments"] is not None else "—",
+                                                "Debt Issued ($B)": f"{row['debt_issuance']/1e9:.2f}" if row["debt_issuance"] is not None else "—",
+                                                "Net Paydown ($B)": f"{row['net_debt_paydown']/1e9:+.2f}" if row["net_debt_paydown"] is not None else "—",
+                                            })
+                                        st.dataframe(_detail_rows, hide_index=True, use_container_width=True)
+
+                                        _tags = _edgar_cap.get("source_tags", {})
+                                        _tag_parts = [f"{k}: `{v}`" for k, v in _tags.items() if v]
+                                        if _tag_parts:
+                                            st.caption("Source tags used: " + " · ".join(_tag_parts))
+                            except Exception as _e:
+                                st.warning(f"EDGAR verification failed: {_e}")
 
                     # --- Reverse DCF ---
                     # Use initial calculation for stable inputs (FCF/revenue/shares/net debt).
