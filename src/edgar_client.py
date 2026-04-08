@@ -43,13 +43,18 @@ BUYBACK_TAGS = [
 ]
 DEBT_REPAYMENT_TAGS = [
     "RepaymentsOfLongTermDebt",
+    "RepaymentsOfLongTermDebtAndCapitalSecurities",
     "RepaymentsOfDebt",
     "RepaymentsOfNotesPayable",
-    "RepaymentsOfLongTermDebtAndCapitalSecurities",
+    "RepaymentsOfSeniorDebt",
+    "RepaymentsOfFirstMortgageBond",
 ]
 DEBT_ISSUANCE_TAGS = [
     "ProceedsFromIssuanceOfLongTermDebt",
+    "ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+    "ProceedsFromIssuanceOfLongTermDebtAndCapitalSecurities",
     "ProceedsFromIssuanceOfDebt",
+    "ProceedsFromIssuanceOfSeniorLongTermDebt",
     "ProceedsFromNotesPayable",
     "ProceedsFromLongTermDebt",
 ]
@@ -428,8 +433,11 @@ class EDGARClient:
     def _extract_annual_fact_series(self, facts_root: dict, tag_chain: list[str],
                                      years: int) -> tuple[list[dict], str | None]:
         """
-        Walk a fallback chain of us-gaap tags and return the first one with
-        usable annual data.
+        Walk a fallback chain of us-gaap tags and return the one with the
+        FRESHEST annual data. We don't just take the first tag that has any
+        data, because some companies (e.g. SYY) stop using a tag after a
+        certain year and switch to a more specific variant. Picking the
+        freshest tag handles those mid-life renamings correctly.
 
         Returns:
             (series, source_tag) where series is a list of
@@ -441,13 +449,13 @@ class EDGARClient:
         if not us_gaap:
             return [], None
 
-        for tag in tag_chain:
+        def _build_series_for_tag(tag: str) -> list[dict]:
             tag_data = us_gaap.get(tag)
             if not tag_data:
-                continue
+                return []
             usd_units = tag_data.get("units", {}).get("USD", [])
             if not usd_units:
-                continue
+                return []
 
             # Filter to annual periods only (fp == "FY") and dedup by period
             # end date, keeping the latest-filed entry to capture restatements.
@@ -456,8 +464,6 @@ class EDGARClient:
                 if entry.get("fp") != "FY":
                     continue
                 form = entry.get("form", "")
-                # Only trust 10-K / 10-K/A for annual figures (10-Q "FY" is rare
-                # but possible for stub periods — skip those)
                 if not form.startswith("10-K"):
                     continue
                 end = entry.get("end")
@@ -468,32 +474,46 @@ class EDGARClient:
                     by_period[end] = entry
 
             if not by_period:
-                continue
+                return []
 
-            # Sort by period end date desc, take the most recent N years
             sorted_entries = sorted(by_period.values(),
                                     key=lambda e: e.get("end", ""),
                                     reverse=True)[:years]
 
-            series = []
+            built = []
             for e in sorted_entries:
                 end = e.get("end", "")
                 try:
                     fiscal_year = int(end[:4])
                 except (ValueError, IndexError):
                     continue
-                series.append({
+                built.append({
                     "fiscal_year": fiscal_year,
                     "value": float(e.get("val", 0)),
                     "end_date": end,
                     "filed": e.get("filed"),
                     "accession": e.get("accn"),
                 })
+            return built
 
-            if series:
-                return series, tag
+        # Build series for each candidate tag, then pick the one whose most
+        # recent observation has the latest end_date. This handles cases where
+        # a company switches tags mid-life (the old tag still has data for
+        # historical years but is no longer being updated).
+        best_series: list[dict] = []
+        best_tag: str | None = None
+        best_end: str = ""
+        for tag in tag_chain:
+            candidate = _build_series_for_tag(tag)
+            if not candidate:
+                continue
+            candidate_end = candidate[0]["end_date"]  # series is sorted desc
+            if candidate_end > best_end:
+                best_series = candidate
+                best_tag = tag
+                best_end = candidate_end
 
-        return [], None
+        return best_series, best_tag
 
     def get_capital_actions(self, ticker: str, years: int = 5) -> dict:
         """
