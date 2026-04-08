@@ -1,3 +1,7 @@
 ticker,company_name,segment,sub_segment
+ABEV,Ambev S.A.,beverages_alcoholic,
+BUD,Anheuser-Busch InBev SA/NV,beverages_alcoholic,
+CCU,Compañía Cervecerías Unidas S.A.,beverages_alcoholic,
+FMX,"Fomento Económico Mexicano, S.A.B. de C.V.",beverages_alcoholic,
 SAM,"The Boston Beer Company, Inc.",beverages_alcoholic,
 TAP,Molson Coors Beverage Company,beverages_alcoholic,

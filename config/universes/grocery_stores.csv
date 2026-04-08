@@ -1,5 +1,6 @@
 ticker,company_name,segment,sub_segment
 ACI,"Albertsons Companies, Inc.",grocery_stores,
+DDL,Dingdong (Cayman) Limited,grocery_stores,
 DNUT,"Krispy Kreme, Inc.",grocery_stores,
 GO,Grocery Outlet Holding Corp.,grocery_stores,
 IMKTA,"Ingles Markets, Incorporated",grocery_stores,

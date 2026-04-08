@@ -1,7 +1,6 @@
 ticker,company_name,segment,sub_segment
 CME,CME Group Inc.,financial_data_and_stock_exchanges,
 COIN,"Coinbase Global, Inc.",financial_data_and_stock_exchanges,
-DNB,"Dun & Bradstreet Holdings, Inc.",financial_data_and_stock_exchanges,
 FDS,FactSet Research Systems Inc.,financial_data_and_stock_exchanges,
 ICE,"Intercontinental Exchange, Inc.",financial_data_and_stock_exchanges,
 MCO,Moody's Corporation,financial_data_and_stock_exchanges,

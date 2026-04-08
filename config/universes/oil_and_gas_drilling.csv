@@ -1,6 +1,10 @@
 ticker,company_name,segment,sub_segment
-DO,"Diamond Offshore Drilling, Inc.",oil_and_gas_drilling,
+BORR,Borr Drilling Limited,oil_and_gas_drilling,
 HP,"Helmerich & Payne, Inc.",oil_and_gas_drilling,
+NBR,Nabors Industries Ltd.,oil_and_gas_drilling,
 NE,Noble Corporation Plc,oil_and_gas_drilling,
+PDS,Precision Drilling Corporation,oil_and_gas_drilling,
 PTEN,"Patterson-UTI Energy, Inc.",oil_and_gas_drilling,
+RIG,Transocean Ltd.,oil_and_gas_drilling,
+SDRL,Seadrill Limited,oil_and_gas_drilling,
 SOC,Sable Offshore Corp.,oil_and_gas_drilling,

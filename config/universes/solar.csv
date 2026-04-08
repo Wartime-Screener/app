@@ -1,6 +1,8 @@
 ticker,company_name,segment,sub_segment
 ARRY,"Array Technologies, Inc.",solar,
+CSIQ,Canadian Solar Inc.,solar,
 ENPH,"Enphase Energy, Inc.",solar,
 FSLR,"First Solar, Inc.",solar,
 RUN,Sunrun Inc.,solar,
+SEDG,"SolarEdge Technologies, Inc.",solar,
 SHLS,"Shoals Technologies Group, Inc.",solar,

@@ -1,8 +1,10 @@
 ticker,company_name,segment,sub_segment
 ACT,"Enact Holdings, Inc.",insurance_specialty,
+AGO,Assured Guaranty Ltd.,insurance_specialty,
 AIZ,"Assurant, Inc.",insurance_specialty,
 AMSF,"AMERISAFE, Inc.",insurance_specialty,
 EIG,"Employers Holdings, Inc.",insurance_specialty,
+ESNT,Essent Group Ltd.,insurance_specialty,
 FAF,First American Financial Corporation,insurance_specialty,
 FNF,"Fidelity National Financial, Inc.",insurance_specialty,
 HIPO,Hippo Holdings Inc.,insurance_specialty,

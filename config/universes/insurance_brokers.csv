@@ -1,9 +1,11 @@
 ticker,company_name,segment,sub_segment
 AJG,Arthur J. Gallagher & Co.,insurance_brokers,
+AON,Aon plc,insurance_brokers,
+ARX,Accelerant Holdings,insurance_brokers,
 BRO,"Brown & Brown, Inc.",insurance_brokers,
-BRP,"BRP Group, Inc.",insurance_brokers,
 BWIN,"The Baldwin Insurance Group, Inc.",insurance_brokers,
+CRD-A,Crawford & Company,insurance_brokers,
 CRVL,CorVel Corporation,insurance_brokers,
 ERIE,Erie Indemnity Company,insurance_brokers,
-MMC,"Marsh & McLennan Companies, Inc.",insurance_brokers,
 MRSH,"Marsh & McLennan Companies, Inc.",insurance_brokers,
+WTW,Willis Towers Watson Public Limited Company,insurance_brokers,

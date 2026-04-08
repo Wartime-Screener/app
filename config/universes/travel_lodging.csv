@@ -1,8 +1,9 @@
 ticker,company_name,segment,sub_segment
+ATAT,Atour Lifestyle Holdings Limited,travel_lodging,
 CHH,"Choice Hotels International, Inc.",travel_lodging,
 H,Hyatt Hotels Corporation,travel_lodging,
 HLT,Hilton Worldwide Holdings Inc.,travel_lodging,
+HTHT,H World Group Limited,travel_lodging,
+IHG,InterContinental Hotels Group PLC,travel_lodging,
 MAR,"Marriott International, Inc.",travel_lodging,
-MCG,Membership Collective Group Inc.,travel_lodging,
-SHCO,Soho House & Co Inc.,travel_lodging,
 WH,"Wyndham Hotels & Resorts, Inc.",travel_lodging,
