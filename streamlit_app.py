@@ -452,6 +452,26 @@ analyze a specific company.*"""
             help="Exclude tickers with Debt/Equity above this value.",
         )
 
+    filter_row3 = st.columns(3)
+    with filter_row3[0]:
+        min_piotroski = st.number_input(
+            "Min Piotroski F-Score",
+            min_value=0, max_value=9, value=0, step=1,
+            help="0-9. Higher = better fundamentals. 8-9 = strong. 0-4 = weak.",
+        )
+    with filter_row3[1]:
+        min_altman = st.number_input(
+            "Min Altman Z-Score",
+            min_value=0.0, max_value=10.0, value=0.0, step=0.5,
+            help="Safe ≥ 2.99 · Grey 1.81–2.99 · Distress < 1.81. Not applicable to financials/REITs.",
+        )
+    with filter_row3[2]:
+        max_beneish = st.number_input(
+            "Max Beneish M-Score",
+            min_value=-5.0, max_value=0.0, value=0.0, step=0.1,
+            help="Lower = cleaner. > -1.78 flags likely manipulation. Set to -1.78 to exclude flagged names.",
+        )
+
     # Scan button
     _left, _center, _right = st.columns([2, 1, 2])
     col_export = _right
@@ -513,6 +533,12 @@ analyze a specific company.*"""
             filters["min_roe"] = min_roe / 100.0  # UI shows %, backend expects decimal
         if max_de < 10:
             filters["max_debt_to_equity"] = max_de
+        if min_piotroski > 0:
+            filters["min_piotroski"] = min_piotroski
+        if min_altman > 0:
+            filters["min_altman"] = min_altman
+        if max_beneish < 0:
+            filters["max_beneish"] = max_beneish
 
         if filters:
             results_df = apply_filters(results_df, filters)
@@ -538,6 +564,16 @@ analyze a specific company.*"""
             if col in results_df.columns:
                 display_cols.append(col)
 
+        # Add quality score columns
+        quality_display = {
+            "piotroski_f_score": "Piotroski F",
+            "altman_z_score": "Altman Z",
+            "beneish_m_score": "Beneish M",
+        }
+        for col in quality_display:
+            if col in results_df.columns:
+                display_cols.append(col)
+
         # Only keep columns that exist
         display_cols = [c for c in display_cols if c in results_df.columns]
         display_df = results_df[display_cols].copy()
@@ -551,6 +587,7 @@ analyze a specific company.*"""
             "flags": "Flags",
         }
         rename_map.update({k: v for k, v in ratio_display.items() if k in display_df.columns})
+        rename_map.update({k: v for k, v in quality_display.items() if k in display_df.columns})
         display_df = display_df.rename(columns=rename_map)
 
         st.subheader(f"Results ({len(display_df)} tickers)")

@@ -257,6 +257,26 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if "segments" in filters and "segment" in result.columns:
         result = result[result["segment"].isin(filters["segments"])]
 
+    # Quality score filters
+    if "min_piotroski" in filters and "piotroski_f_score" in result.columns:
+        result = result[
+            result["piotroski_f_score"].isna()
+            | (result["piotroski_f_score"] >= filters["min_piotroski"])
+        ]
+
+    if "min_altman" in filters and "altman_z_score" in result.columns:
+        result = result[
+            result["altman_z_score"].isna()
+            | (result["altman_z_score"] >= filters["min_altman"])
+        ]
+
+    if "max_beneish" in filters and "beneish_m_score" in result.columns:
+        # Lower M-Score = less manipulation risk, so this is a max filter
+        result = result[
+            result["beneish_m_score"].isna()
+            | (result["beneish_m_score"] <= filters["max_beneish"])
+        ]
+
     return result.reset_index(drop=True)
 
 
@@ -297,5 +317,13 @@ def _flatten_analysis(analysis: dict) -> dict:
         flat[f"{metric_name}_hist_avg"] = data.get("hist_avg")
         flat[f"{metric_name}_hist_low"] = data.get("hist_low")
         flat[f"{metric_name}_hist_high"] = data.get("hist_high")
+
+    # Flatten quality scores (Piotroski / Altman / Beneish)
+    _piot = analysis.get("piotroski_f_score") or {}
+    _alt  = analysis.get("altman_z_score") or {}
+    _ben  = analysis.get("beneish_m_score") or {}
+    flat["piotroski_f_score"] = _piot.get("score") if _piot.get("has_data") else None
+    flat["altman_z_score"]    = _alt.get("score")  if _alt.get("has_data") else None
+    flat["beneish_m_score"]   = _ben.get("score")  if _ben.get("has_data") else None
 
     return flat
