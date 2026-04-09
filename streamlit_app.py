@@ -2152,8 +2152,13 @@ elif active_tab == "Ticker Deep Dive":
                             )
 
                             _hist_share_chg = assumptions.get("hist_share_change")
+                            _hist_share_chg_2yr = assumptions.get("hist_share_change_2yr")
                             _share_chg_default = float(_hist_share_chg) if _hist_share_chg is not None else 0.0
                             _share_chg_type = "buyback" if _share_chg_default < -0.05 else ("dilution" if _share_chg_default > 0.05 else "neutral")
+                            _share_chg_2yr_str = (
+                                f"  2yr CAGR: {_hist_share_chg_2yr:+.1f}%/yr."
+                                if _hist_share_chg_2yr is not None else ""
+                            )
                             user_share_change = st.number_input(
                                 "Annual Share Count Change (%)",
                                 min_value=-20.0, max_value=20.0,
@@ -2161,7 +2166,7 @@ elif active_tab == "Ticker Deep Dive":
                                 step=0.1, format="%.1f",
                                 key="dcf_share_change",
                                 help=(
-                                    f"Auto-detected from share history: {_share_chg_default:+.1f}%/yr ({_share_chg_type}). "
+                                    f"Auto-detected from share history: {_share_chg_default:+.1f}%/yr ({_share_chg_type}).{_share_chg_2yr_str} "
                                     "Negative = buybacks shrinking share count (boosts per-share value). "
                                     "Positive = stock comp dilution (reduces per-share value). "
                                     "Applied by projecting terminal shares over the 10-year horizon."
@@ -2349,8 +2354,13 @@ elif active_tab == "Ticker Deep Dive":
                                 )
                             with _rev_extra_cols[2]:
                                 _hist_share_chg_r = _rev_assumptions.get("hist_share_change")
+                                _hist_share_chg_r_2yr = _rev_assumptions.get("hist_share_change_2yr")
                                 _share_chg_default_r = float(_hist_share_chg_r) if _hist_share_chg_r is not None else 0.0
                                 _share_chg_type_r = "buyback" if _share_chg_default_r < -0.05 else ("dilution" if _share_chg_default_r > 0.05 else "neutral")
+                                _share_chg_2yr_str_r = (
+                                    f"  2yr CAGR: {_hist_share_chg_r_2yr:+.1f}%/yr."
+                                    if _hist_share_chg_r_2yr is not None else ""
+                                )
                                 user_share_change_r = st.number_input(
                                     "Annual Share Count Change (%)",
                                     min_value=-20.0, max_value=20.0,
@@ -2358,7 +2368,7 @@ elif active_tab == "Ticker Deep Dive":
                                     step=0.1, format="%.1f",
                                     key="dcf_rev_share_change",
                                     help=(
-                                        f"Auto-detected: {_share_chg_default_r:+.1f}%/yr ({_share_chg_type_r}). "
+                                        f"Auto-detected: {_share_chg_default_r:+.1f}%/yr ({_share_chg_type_r}).{_share_chg_2yr_str_r} "
                                         "Negative = buybacks reducing share count (boosts per-share value). "
                                         "Positive = dilution from stock comp."
                                     ),

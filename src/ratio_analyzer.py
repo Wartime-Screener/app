@@ -1023,6 +1023,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
 
     # --- Historical share count change (buybacks = negative, dilution = positive) ---
     hist_share_change = None
+    hist_share_change_2yr = None
     share_count_values = []
     for stmt in income_statements[:5]:
         s = _safe_float(stmt.get("weightedAverageShsOutDil") or stmt.get("weightedAverageShsOut"))
@@ -1030,6 +1031,11 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             share_count_values.append(s)
     if len(share_count_values) >= 2:
         hist_share_change = (share_count_values[0] / share_count_values[-1]) ** (1 / (len(share_count_values) - 1)) - 1
+    # 2-year CAGR (more recent trend)
+    if len(share_count_values) >= 3:
+        hist_share_change_2yr = (share_count_values[0] / share_count_values[2]) ** 0.5 - 1
+    elif len(share_count_values) >= 2:
+        hist_share_change_2yr = share_count_values[0] / share_count_values[1] - 1
 
     resolved_share_change = annual_share_change if annual_share_change is not None else (hist_share_change or 0.0)
     resolved_share_change = max(-0.20, min(0.20, resolved_share_change))
@@ -1342,6 +1348,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                 "wacc_breakdown": wacc_breakdown,
                 "annual_share_change": round(resolved_share_change * 100, 2),
                 "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
+                "hist_share_change_2yr": round(hist_share_change_2yr * 100, 1) if hist_share_change_2yr is not None else None,
                 "reinvestment_model": bool(reinvestment_info),
                 "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
                 "roic": round(reinvestment_info["roic"] * 100, 2) if reinvestment_info else None,
@@ -1455,6 +1462,7 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             "wacc_breakdown": wacc_breakdown,
             "annual_share_change": round(resolved_share_change * 100, 2),
             "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
+            "hist_share_change_2yr": round(hist_share_change_2yr * 100, 1) if hist_share_change_2yr is not None else None,
             "terminal_shares": round(terminal_shares, 0),
             "reinvestment_model": bool(reinvestment_info),
             "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
@@ -1689,6 +1697,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
 
     # --- Historical share count change (buybacks = negative, dilution = positive) ---
     hist_share_change_r = None
+    hist_share_change_r_2yr = None
     share_count_values_r = []
     for stmt in income_statements[:5]:
         s = _safe_float(stmt.get("weightedAverageShsOutDil") or stmt.get("weightedAverageShsOut"))
@@ -1696,6 +1705,11 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             share_count_values_r.append(s)
     if len(share_count_values_r) >= 2:
         hist_share_change_r = (share_count_values_r[0] / share_count_values_r[-1]) ** (1 / (len(share_count_values_r) - 1)) - 1
+    # 2-year CAGR — more responsive to recent buyback acceleration/deceleration
+    if len(share_count_values_r) >= 3:
+        hist_share_change_r_2yr = (share_count_values_r[0] / share_count_values_r[2]) ** 0.5 - 1
+    elif len(share_count_values_r) >= 2:
+        hist_share_change_r_2yr = share_count_values_r[0] / share_count_values_r[1] - 1
 
     resolved_share_change_r = annual_share_change if annual_share_change is not None else (hist_share_change_r or 0.0)
     resolved_share_change_r = max(-0.20, min(0.20, resolved_share_change_r))
@@ -1908,6 +1922,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
                 "wacc_breakdown": wacc_breakdown,
                 "annual_share_change": round(resolved_share_change_r * 100, 2),
                 "hist_share_change": round(hist_share_change_r * 100, 1) if hist_share_change_r is not None else None,
+                "hist_share_change_2yr": round(hist_share_change_r_2yr * 100, 1) if hist_share_change_r_2yr is not None else None,
                 "mid_year_discounting": bool(use_mid_year_discounting),
             },
             "projected_fcfs": projected_fcfs,
