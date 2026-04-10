@@ -2771,6 +2771,27 @@ elif active_tab == "Ticker Deep Dive":
                                 _ca_shares = _ca_assumptions.get("shares_outstanding")
                                 _ca_fmp_share_dec = (_ca_fmp_share_chg / 100.0) if _ca_fmp_share_chg is not None else None
 
+                                # Fetch latest quarterly share count to detect
+                                # recent buyback acceleration not yet in annual data
+                                _qtly_share_change_ann = None
+                                try:
+                                    _ticker_for_qtly = _analysis.get("ticker", "")
+                                    _qtly_stmts = fmp.get_income_statement(_ticker_for_qtly, period="quarter", limit=8)
+                                    _qtly_dil_values = []
+                                    for _qs in _qtly_stmts:
+                                        _qv = _qs.get("weightedAverageShsOutDil") or _qs.get("weightedAverageShsOut")
+                                        if _qv and float(_qv) > 0:
+                                            _qtly_dil_values.append(float(_qv))
+                                    # Compare latest quarter vs 4 quarters ago (YoY quarterly)
+                                    if len(_qtly_dil_values) >= 5:
+                                        _qtly_share_change_ann = (_qtly_dil_values[0] / _qtly_dil_values[4]) - 1
+                                    elif len(_qtly_dil_values) >= 2:
+                                        # Annualize from whatever span we have
+                                        _span_q = len(_qtly_dil_values) - 1
+                                        _qtly_share_change_ann = (_qtly_dil_values[0] / _qtly_dil_values[-1]) ** (4.0 / _span_q) - 1
+                                except Exception:
+                                    _qtly_share_change_ann = None
+
                                 _edgar_cap = edgar.get_capital_actions(_analysis.get("ticker", ""), years=5)
                                 _recon = reconcile_capital_actions(
                                     edgar_data=_edgar_cap,
@@ -2843,23 +2864,51 @@ elif active_tab == "Ticker Deep Dive":
                                         _bb_label = _bb.get("verdict_label", "—")
                                         _bb_emoji, _bb_color = _bb_label_palette.get(_bb_label, ("•", "#9ca3af"))
 
-                                        _bb_cols = st.columns(4)
-                                        with _bb_cols[0]:
+                                        # Row 1: Annual-based share count trends
+                                        _bb_row1 = st.columns(3)
+                                        with _bb_row1[0]:
                                             _bb_pct = _bb.get("fmp_share_change_pct")
                                             st.metric(
-                                                "Actual share Δ (FMP)",
+                                                "Share Δ 5yr",
                                                 f"{_bb_pct*100:+.1f}%/yr" if _bb_pct is not None else "N/A",
-                                                help="The real change in diluted share count, year over year. "
-                                                     "Negative = shrinking (real reduction), positive = growing (dilution). "
-                                                     "This is what flows to your DCF per-share denominator."
+                                                help="5-year CAGR of diluted share count from annual data. "
+                                                     "Negative = shrinking, positive = growing (dilution). "
+                                                     "This is the long-term trend used in the DCF."
                                             )
-                                        with _bb_cols[1]:
+                                        with _bb_row1[1]:
+                                            _bb_pct_2yr = _ca_assumptions.get("hist_share_change_2yr")
+                                            _bb_pct_2yr_dec = _bb_pct_2yr / 100.0 if _bb_pct_2yr is not None else None
+                                            st.metric(
+                                                "Share Δ 2yr",
+                                                f"{_bb_pct_2yr:+.1f}%/yr" if _bb_pct_2yr is not None else "N/A",
+                                                help="2-year CAGR of diluted share count from annual data."
+                                            )
+                                        with _bb_row1[2]:
+                                            # Latest quarterly YoY share count change
+                                            _qtly_delta_str = None
+                                            if _qtly_share_change_ann is not None and _bb_pct is not None:
+                                                _qtly_diff = (_qtly_share_change_ann - _bb_pct) * 100
+                                                if abs(_qtly_diff) >= 0.5:
+                                                    _qtly_delta_str = f"{_qtly_diff:+.1f}pp vs 5yr"
+                                            st.metric(
+                                                "Share Δ Latest Q (YoY)",
+                                                f"{_qtly_share_change_ann*100:+.1f}%/yr" if _qtly_share_change_ann is not None else "N/A",
+                                                delta=_qtly_delta_str,
+                                                delta_color="inverse",
+                                                help="Year-over-year change in diluted shares from the most recent quarterly "
+                                                     "filing vs the same quarter a year ago. This is the most current signal "
+                                                     "and catches buyback acceleration not yet visible in annual data."
+                                            )
+
+                                        # Row 2: EDGAR buyback data + SBC absorption
+                                        _bb_row2 = st.columns(3)
+                                        with _bb_row2[0]:
                                             st.metric(
                                                 "Buyback $ (EDGAR)",
                                                 f"${_bb['edgar_dollars']/1e9:.2f}B/yr",
                                                 help="PaymentsForRepurchaseOfCommonStock, 5yr avg from SEC XBRL filings."
                                             )
-                                        with _bb_cols[2]:
+                                        with _bb_row2[1]:
                                             _bb_yld = _bb.get("edgar_yield")
                                             st.metric(
                                                 "Buyback yield",
@@ -2867,10 +2916,9 @@ elif active_tab == "Ticker Deep Dive":
                                                 help="Buyback dollars ÷ market cap. The 'intensity' of the buyback program — "
                                                      "what % of market cap they spend on repurchases each year."
                                             )
-                                        with _bb_cols[3]:
+                                        with _bb_row2[2]:
                                             _abs = _bb.get("sbc_absorption_pct")
                                             if _abs is not None:
-                                                # Color the delta inversely: lower absorption is better
                                                 _abs_delta_color = "normal" if _abs >= 50 else "inverse"
                                                 st.metric(
                                                     "SBC absorption",
@@ -2883,6 +2931,26 @@ elif active_tab == "Ticker Deep Dive":
                                                 )
                                             else:
                                                 st.metric("SBC absorption", "—")
+
+                                        # Trend divergence warning — use quarterly signal as primary if available
+                                        _best_recent = _qtly_share_change_ann if _qtly_share_change_ann is not None else _bb_pct_2yr_dec
+                                        _best_recent_label = "Latest Q YoY" if _qtly_share_change_ann is not None else "2yr"
+                                        if _bb_pct is not None and _best_recent is not None:
+                                            _trend_diff_abs = abs((_best_recent - _bb_pct) * 100)
+                                            if _trend_diff_abs >= 1.0:
+                                                _direction = "accelerating buybacks" if _best_recent < _bb_pct else "increasing dilution"
+                                                _warn_color = "#4ade80" if _best_recent < _bb_pct else "#fbbf24"
+                                                st.markdown(
+                                                    f"<div style='padding:8px 12px; border-left: 3px solid {_warn_color}; "
+                                                    f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 6px 0'>"
+                                                    f"<strong style='color:{_warn_color}'>📊 Trend Shift</strong> "
+                                                    f"<span style='font-size:0.9em'>— {_best_recent_label} share count trend "
+                                                    f"({_best_recent*100:+.1f}%/yr) diverges from 5yr ({_bb_pct*100:+.1f}%/yr) "
+                                                    f"by {_trend_diff_abs:.1f}pp, suggesting {_direction}. "
+                                                    f"The 5yr CAGR may not reflect current capital allocation.</span>"
+                                                    f"</div>",
+                                                    unsafe_allow_html=True,
+                                                )
 
                                         if _bb.get("note"):
                                             st.markdown(
@@ -3580,6 +3648,83 @@ elif active_tab == "Balance Sheet Health":
         "Focus on balance sheet strength: debt-to-equity, current ratio, "
         "quick ratio, and interest coverage. Ranked by overall balance sheet score."
     )
+
+    # --- Single-ticker quick lookup ---
+    _bs_single_ticker = st.text_input(
+        "Quick lookup — enter a single ticker",
+        value="",
+        placeholder="e.g. AAPL",
+        key="bs_single_ticker",
+        help="Analyze one company's balance sheet instantly without running a full industry scan.",
+    ).strip().upper()
+
+    if _bs_single_ticker:
+        if not fmp.is_configured:
+            st.error("FMP API key is required.")
+        else:
+            with st.spinner(f"Analyzing {_bs_single_ticker}..."):
+                _bs_single = analyze_ticker(_bs_single_ticker, fmp, history_years=20, risk_free_rate=_risk_free_rate)
+            if not _bs_single or not _bs_single.get("metrics"):
+                st.warning(f"No data returned for **{_bs_single_ticker}**. Check the ticker symbol.")
+            else:
+                _bs_m = _bs_single["metrics"]
+                _bs_ctx = _bs_single.get("earnings_context") or {}
+
+                st.subheader(f"{_bs_single.get('company_name', _bs_single_ticker)} — Balance Sheet Health")
+
+                # Core metrics row
+                _bs1_cols = st.columns(4)
+                _bs_metric_keys = [
+                    ("debt_to_equity",   "Debt / Equity",     False, "1.2x"),
+                    ("current_ratio",    "Current Ratio",     True,  "1.5x"),
+                    ("quick_ratio",      "Quick Ratio",       True,  "1.0x"),
+                    ("interest_coverage","Interest Coverage",  True,  "3.0x"),
+                ]
+                for i, (key, label, higher_good, _) in enumerate(_bs_metric_keys):
+                    with _bs1_cols[i]:
+                        data = _bs_m.get(key, {})
+                        val = data.get("current")
+                        pct = data.get("percentile")
+                        if val is not None:
+                            st.metric(
+                                label,
+                                f"{val:.2f}x" if key != "interest_coverage" else f"{val:.1f}x",
+                            )
+                            if pct is not None:
+                                if higher_good:
+                                    _bs_badge = "🟢" if pct > 60 else ("🔴" if pct < 20 else "🟡")
+                                else:
+                                    _bs_badge = "🟢" if pct < 40 else ("🔴" if pct > 80 else "🟡")
+                                st.caption(f"{_bs_badge} {pct:.0f}th percentile vs own history")
+                        else:
+                            st.metric(label, "N/A")
+
+                # Historical context row
+                _bs2_cols = st.columns(4)
+                for i, (key, label, higher_good, _) in enumerate(_bs_metric_keys):
+                    with _bs2_cols[i]:
+                        data = _bs_m.get(key, {})
+                        avg = data.get("hist_avg")
+                        low = data.get("hist_low")
+                        high = data.get("hist_high")
+                        yrs = data.get("years_of_data", 0)
+                        if avg is not None:
+                            st.caption(
+                                f"**{yrs}yr range:** {low:.2f} – {high:.2f}  \n"
+                                f"**Avg:** {avg:.2f}"
+                            )
+
+                # Fundamentals flags
+                _bs_nd_ebitda = _bs_ctx.get("net_debt_to_ebitda")
+                _bs_flags = _bs_ctx.get("context_flags", [])
+                _bs_flag_parts = []
+                if _bs_nd_ebitda is not None:
+                    _bs_flag_parts.append(f"Net Debt/EBITDA: **{_bs_nd_ebitda:.1f}x**")
+                _bs_flag_parts += [f for f in _bs_flags if "debt" in f.lower() or "leverage" in f.lower() or "coverage" in f.lower()]
+                if _bs_flag_parts:
+                    st.markdown(" · ".join(_bs_flag_parts))
+
+                st.markdown("---")
 
     # Use scan results if available, otherwise prompt
     if "scan_results" in st.session_state and not st.session_state["scan_results"].empty:
