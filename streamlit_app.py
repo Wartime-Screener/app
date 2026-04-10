@@ -352,7 +352,6 @@ _TAB_OPTIONS = [
     "Screener Dashboard",
     "Ticker Deep Dive",
     "Ratio Comparison",
-    "Balance Sheet Health",
     "EIA Inventories",
     "Commodity Prices",
     "Economic Indicators",
@@ -2771,6 +2770,27 @@ elif active_tab == "Ticker Deep Dive":
                                 _ca_shares = _ca_assumptions.get("shares_outstanding")
                                 _ca_fmp_share_dec = (_ca_fmp_share_chg / 100.0) if _ca_fmp_share_chg is not None else None
 
+                                # Fetch latest quarterly share count to detect
+                                # recent buyback acceleration not yet in annual data
+                                _qtly_share_change_ann = None
+                                try:
+                                    _ticker_for_qtly = _analysis.get("ticker", "")
+                                    _qtly_stmts = fmp.get_income_statement(_ticker_for_qtly, period="quarter", limit=8)
+                                    _qtly_dil_values = []
+                                    for _qs in _qtly_stmts:
+                                        _qv = _qs.get("weightedAverageShsOutDil") or _qs.get("weightedAverageShsOut")
+                                        if _qv and float(_qv) > 0:
+                                            _qtly_dil_values.append(float(_qv))
+                                    # Compare latest quarter vs 4 quarters ago (YoY quarterly)
+                                    if len(_qtly_dil_values) >= 5:
+                                        _qtly_share_change_ann = (_qtly_dil_values[0] / _qtly_dil_values[4]) - 1
+                                    elif len(_qtly_dil_values) >= 2:
+                                        # Annualize from whatever span we have
+                                        _span_q = len(_qtly_dil_values) - 1
+                                        _qtly_share_change_ann = (_qtly_dil_values[0] / _qtly_dil_values[-1]) ** (4.0 / _span_q) - 1
+                                except Exception:
+                                    _qtly_share_change_ann = None
+
                                 _edgar_cap = edgar.get_capital_actions(_analysis.get("ticker", ""), years=5)
                                 _recon = reconcile_capital_actions(
                                     edgar_data=_edgar_cap,
@@ -2843,23 +2863,51 @@ elif active_tab == "Ticker Deep Dive":
                                         _bb_label = _bb.get("verdict_label", "—")
                                         _bb_emoji, _bb_color = _bb_label_palette.get(_bb_label, ("•", "#9ca3af"))
 
-                                        _bb_cols = st.columns(4)
-                                        with _bb_cols[0]:
+                                        # Row 1: Annual-based share count trends
+                                        _bb_row1 = st.columns(3)
+                                        with _bb_row1[0]:
                                             _bb_pct = _bb.get("fmp_share_change_pct")
                                             st.metric(
-                                                "Actual share Δ (FMP)",
+                                                "Share Δ 5yr",
                                                 f"{_bb_pct*100:+.1f}%/yr" if _bb_pct is not None else "N/A",
-                                                help="The real change in diluted share count, year over year. "
-                                                     "Negative = shrinking (real reduction), positive = growing (dilution). "
-                                                     "This is what flows to your DCF per-share denominator."
+                                                help="5-year CAGR of diluted share count from annual data. "
+                                                     "Negative = shrinking, positive = growing (dilution). "
+                                                     "This is the long-term trend used in the DCF."
                                             )
-                                        with _bb_cols[1]:
+                                        with _bb_row1[1]:
+                                            _bb_pct_2yr = _ca_assumptions.get("hist_share_change_2yr")
+                                            _bb_pct_2yr_dec = _bb_pct_2yr / 100.0 if _bb_pct_2yr is not None else None
+                                            st.metric(
+                                                "Share Δ 2yr",
+                                                f"{_bb_pct_2yr:+.1f}%/yr" if _bb_pct_2yr is not None else "N/A",
+                                                help="2-year CAGR of diluted share count from annual data."
+                                            )
+                                        with _bb_row1[2]:
+                                            # Latest quarterly YoY share count change
+                                            _qtly_delta_str = None
+                                            if _qtly_share_change_ann is not None and _bb_pct is not None:
+                                                _qtly_diff = (_qtly_share_change_ann - _bb_pct) * 100
+                                                if abs(_qtly_diff) >= 0.5:
+                                                    _qtly_delta_str = f"{_qtly_diff:+.1f}pp vs 5yr"
+                                            st.metric(
+                                                "Share Δ Latest Q (YoY)",
+                                                f"{_qtly_share_change_ann*100:+.1f}%/yr" if _qtly_share_change_ann is not None else "N/A",
+                                                delta=_qtly_delta_str,
+                                                delta_color="inverse",
+                                                help="Year-over-year change in diluted shares from the most recent quarterly "
+                                                     "filing vs the same quarter a year ago. This is the most current signal "
+                                                     "and catches buyback acceleration not yet visible in annual data."
+                                            )
+
+                                        # Row 2: EDGAR buyback data + SBC absorption
+                                        _bb_row2 = st.columns(3)
+                                        with _bb_row2[0]:
                                             st.metric(
                                                 "Buyback $ (EDGAR)",
                                                 f"${_bb['edgar_dollars']/1e9:.2f}B/yr",
                                                 help="PaymentsForRepurchaseOfCommonStock, 5yr avg from SEC XBRL filings."
                                             )
-                                        with _bb_cols[2]:
+                                        with _bb_row2[1]:
                                             _bb_yld = _bb.get("edgar_yield")
                                             st.metric(
                                                 "Buyback yield",
@@ -2867,10 +2915,9 @@ elif active_tab == "Ticker Deep Dive":
                                                 help="Buyback dollars ÷ market cap. The 'intensity' of the buyback program — "
                                                      "what % of market cap they spend on repurchases each year."
                                             )
-                                        with _bb_cols[3]:
+                                        with _bb_row2[2]:
                                             _abs = _bb.get("sbc_absorption_pct")
                                             if _abs is not None:
-                                                # Color the delta inversely: lower absorption is better
                                                 _abs_delta_color = "normal" if _abs >= 50 else "inverse"
                                                 st.metric(
                                                     "SBC absorption",
@@ -2883,6 +2930,26 @@ elif active_tab == "Ticker Deep Dive":
                                                 )
                                             else:
                                                 st.metric("SBC absorption", "—")
+
+                                        # Trend divergence warning — use quarterly signal as primary if available
+                                        _best_recent = _qtly_share_change_ann if _qtly_share_change_ann is not None else _bb_pct_2yr_dec
+                                        _best_recent_label = "Latest Q YoY" if _qtly_share_change_ann is not None else "2yr"
+                                        if _bb_pct is not None and _best_recent is not None:
+                                            _trend_diff_abs = abs((_best_recent - _bb_pct) * 100)
+                                            if _trend_diff_abs >= 1.0:
+                                                _direction = "accelerating buybacks" if _best_recent < _bb_pct else "increasing dilution"
+                                                _warn_color = "#4ade80" if _best_recent < _bb_pct else "#fbbf24"
+                                                st.markdown(
+                                                    f"<div style='padding:8px 12px; border-left: 3px solid {_warn_color}; "
+                                                    f"background: rgba(255,255,255,0.04); border-radius:4px; margin: 6px 0'>"
+                                                    f"<strong style='color:{_warn_color}'>📊 Trend Shift</strong> "
+                                                    f"<span style='font-size:0.9em'>— {_best_recent_label} share count trend "
+                                                    f"({_best_recent*100:+.1f}%/yr) diverges from 5yr ({_bb_pct*100:+.1f}%/yr) "
+                                                    f"by {_trend_diff_abs:.1f}pp, suggesting {_direction}. "
+                                                    f"The 5yr CAGR may not reflect current capital allocation.</span>"
+                                                    f"</div>",
+                                                    unsafe_allow_html=True,
+                                                )
 
                                         if _bb.get("note"):
                                             st.markdown(
@@ -3569,140 +3636,6 @@ elif active_tab == "Ratio Comparison":
             fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
             st.plotly_chart(fig, use_container_width=True)
 
-
-# ================================================================== #
-# TAB 4: Balance Sheet Health
-# ================================================================== #
-elif active_tab == "Balance Sheet Health":
-    st.header("Balance Sheet Health")
-
-    st.write(
-        "Focus on balance sheet strength: debt-to-equity, current ratio, "
-        "quick ratio, and interest coverage. Ranked by overall balance sheet score."
-    )
-
-    # Use scan results if available, otherwise prompt
-    if "scan_results" in st.session_state and not st.session_state["scan_results"].empty:
-        bs_df = st.session_state["scan_results"].copy()
-    else:
-        bs_uni_map = universe_display_map()
-        bs_display = st.multiselect(
-            "Select industries for balance sheet analysis",
-            options=sorted(bs_uni_map.keys(), key=lambda x: ("⚠️" in x, x)),
-            default=[],
-            help="⚠️ = inverse plays (sectors likely hurt by conflict).",
-            key="bs_universes",
-        )
-        bs_universes = [bs_uni_map[d] for d in bs_display]
-        if st.button("Analyze Balance Sheets", key="bs_scan"):
-            if not fmp.is_configured:
-                st.error("FMP API key is required. Set FMP_API_KEY.")
-                st.stop()
-            progress = st.progress(0, text="Starting...")
-
-            def bs_progress(cur, total, ticker):
-                progress.progress(cur / total, text=f"Analyzing {ticker} ({cur}/{total})")
-
-            bs_df = scan_all_universes(
-                fmp_client=fmp,
-                tradier_client=tradier,
-                universe_names=bs_universes,
-                progress_callback=bs_progress,
-                history_years=history_years,
-            )
-            progress.empty()
-            st.session_state["scan_results"] = bs_df
-        else:
-            bs_df = pd.DataFrame()
-
-    if not bs_df.empty:
-        bs_cols = {
-            "debt_to_equity": "Debt/Equity",
-            "debt_to_equity_pct": "D/E %ile",
-            "current_ratio": "Current Ratio",
-            "current_ratio_pct": "CR %ile",
-            "quick_ratio": "Quick Ratio",
-            "quick_ratio_pct": "QR %ile",
-            "interest_coverage": "Interest Coverage",
-            "interest_coverage_pct": "IC %ile",
-        }
-
-        avail_bs_cols = ["ticker", "company_name", "segment"]
-        for col in bs_cols:
-            if col in bs_df.columns:
-                avail_bs_cols.append(col)
-
-        bs_display = bs_df[avail_bs_cols].copy()
-
-        # Compute balance sheet composite
-        scoring_cfg = load_scoring_config()
-        higher_is_better = set(scoring_cfg.get("higher_is_better", []))
-        pct_cols = [c for c in bs_display.columns if c.endswith("_pct")]
-
-        if pct_cols:
-            def bs_score(row):
-                vals = []
-                for pc in pct_cols:
-                    v = row.get(pc)
-                    if pd.notna(v):
-                        # Determine base metric name
-                        base = pc.replace("_pct", "")
-                        if base in higher_is_better:
-                            vals.append(100.0 - v)
-                        else:
-                            vals.append(v)
-                return sum(vals) / len(vals) if vals else None
-
-            bs_display["BS Score"] = bs_display.apply(bs_score, axis=1)
-            bs_display = bs_display.sort_values("BS Score", ascending=True, na_position="last")
-
-        rename_map = {"ticker": "Ticker", "company_name": "Company", "segment": "Segment"}
-        rename_map.update({k: v for k, v in bs_cols.items() if k in bs_display.columns})
-        bs_display = bs_display.rename(columns=rename_map)
-
-        st.subheader(f"Balance Sheet Rankings ({len(bs_display)} tickers)")
-
-        # Map display %ile column names back to raw metric keys
-        _bs_pct_raw = {v: k.replace("_pct", "") for k, v in bs_cols.items() if k.endswith("_pct")}
-        _bs_hib = {"current_ratio", "quick_ratio", "interest_coverage"}
-
-        def color_pct_bs(val, col_name):
-            if pd.isna(val):
-                return ""
-            raw_key = _bs_pct_raw.get(col_name, "")
-            high_is_good = raw_key in _bs_hib
-            if high_is_good:
-                if val > 80:
-                    return "background-color: rgba(0, 180, 0, 0.3)"
-                elif val < 20:
-                    return "background-color: rgba(220, 50, 50, 0.3)"
-            else:
-                if val < 20:
-                    return "background-color: rgba(0, 180, 0, 0.3)"
-                elif val > 80:
-                    return "background-color: rgba(220, 50, 50, 0.3)"
-            return "background-color: rgba(200, 200, 0, 0.2)"
-
-        pct_display_cols = [c for c in bs_display.columns if "%ile" in c]
-        styled_bs = bs_display.style
-        if pct_display_cols:
-            for pc in pct_display_cols:
-                styled_bs = styled_bs.map(lambda val, _c=pc: color_pct_bs(val, _c), subset=[pc])
-
-        st.dataframe(styled_bs, use_container_width=True, height=600, hide_index=True)
-
-        # Flag deteriorating balance sheets
-        st.subheader("Balance Sheet Warnings")
-        if "D/E %ile" in bs_display.columns:
-            warnings = bs_display[bs_display["D/E %ile"] > 80] if "D/E %ile" in bs_display.columns else pd.DataFrame()
-            if not warnings.empty:
-                st.warning(f"{len(warnings)} tickers have Debt/Equity near 5-year highs:")
-                for _, row in warnings.iterrows():
-                    st.write(f"  - **{row['Ticker']}** ({row['Company']}): D/E at {row.get('D/E %ile', 'N/A'):.0f}th percentile")
-            else:
-                st.success("No tickers with critically high Debt/Equity levels.")
-    else:
-        st.info("Run a scan from the Screener Dashboard or click 'Analyze Balance Sheets' above.")
 
 
 # ================================================================== #
