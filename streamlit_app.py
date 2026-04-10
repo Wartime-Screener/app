@@ -1112,6 +1112,53 @@ elif active_tab == "Ticker Deep Dive":
                 else:
                     st.metric("Net Debt/EBITDA", "N/A")
 
+            # Quality & economic profit row
+            _ccr = fund_ctx.get("cash_conversion_ratio")
+            _ccr_3yr = fund_ctx.get("cash_conversion_3yr_avg")
+            _spread = fund_ctx.get("roic_wacc_spread")
+            _roic = fund_ctx.get("roic_pct")
+            _wacc = fund_ctx.get("wacc_pct")
+            if any(v is not None for v in [_ccr, _spread]):
+                qp_cols = st.columns(4)
+                with qp_cols[0]:
+                    if _ccr is not None:
+                        st.metric(
+                            "Cash Conversion",
+                            f"{_ccr:.2f}x",
+                            help="CFO / Net Income. >1.0 = cash exceeds reported profit (strong). "
+                                 "<0.8 = accrual warning (earnings not backed by cash).",
+                        )
+                    else:
+                        st.metric("Cash Conversion", "N/A")
+                with qp_cols[1]:
+                    if _ccr_3yr is not None:
+                        st.metric(
+                            "Cash Conv. 3yr Avg",
+                            f"{_ccr_3yr:.2f}x",
+                            help="3-year average smooths one-off working capital swings.",
+                        )
+                    else:
+                        st.metric("Cash Conv. 3yr Avg", "N/A")
+                with qp_cols[2]:
+                    if _spread is not None:
+                        _spread_color = "normal" if _spread >= 0 else "inverse"
+                        st.metric(
+                            "ROIC − WACC",
+                            f"{_spread:+.1f}pp",
+                            delta=f"{_spread:+.1f}pp",
+                            delta_color=_spread_color,
+                            help="Economic profit spread. Positive = growth creates value. "
+                                 "Negative = growth destroys value (ROIC below cost of capital).",
+                        )
+                    else:
+                        st.metric("ROIC − WACC", "N/A")
+                with qp_cols[3]:
+                    if _roic is not None and _wacc is not None:
+                        st.caption(
+                            f"ROIC: {_roic:.1f}%  \n"
+                            f"WACC: {_wacc:.1f}%"
+                        )
+
             # Context flags
             if context_flags:
                 for cflag in context_flags:
