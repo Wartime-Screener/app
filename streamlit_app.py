@@ -1147,15 +1147,18 @@ elif active_tab == "Ticker Deep Dive":
                             f"{_spread:+.1f}pp",
                             delta=f"{_spread:+.1f}pp",
                             delta_color=_spread_color,
-                            help="Economic profit spread. Positive = growth creates value. "
-                                 "Negative = growth destroys value (ROIC below cost of capital).",
+                            help="Economic profit spread (NOPAT-based ROIC vs WACC). "
+                                 "Uses EBIT×(1-tax) / (Equity+Debt-Cash), which differs from "
+                                 "FMP's ROIC in the metrics section — FMP uses net income and "
+                                 "a broader IC base. The NOPAT version is the correct one for "
+                                 "comparing against WACC because both are pre-capital-structure.",
                         )
                     else:
                         st.metric("ROIC − WACC", "N/A")
                 with qp_cols[3]:
                     if _roic is not None and _wacc is not None:
                         st.caption(
-                            f"ROIC: {_roic:.1f}%  \n"
+                            f"ROIC (NOPAT): {_roic:.1f}%  \n"
                             f"WACC: {_wacc:.1f}%"
                         )
 
