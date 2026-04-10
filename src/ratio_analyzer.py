@@ -518,7 +518,9 @@ def compute_analyst_accuracy(analyst_estimates: list[dict],
 def build_fundamentals_context(income_statements: list[dict],
                                cash_flow_statements: list[dict] | None = None,
                                balance_sheets: list[dict] | None = None,
-                               history_years: int = 5) -> dict:
+                               history_years: int = 5,
+                               profile: dict | None = None,
+                               risk_free_rate: float | None = None) -> dict:
     """
     Analyze earnings, cash flow, and balance sheet trends to distinguish
     genuinely cheap stocks from value traps.
@@ -550,6 +552,12 @@ def build_fundamentals_context(income_statements: list[dict],
         # Balance sheet / leverage
         "net_debt_to_ebitda": None,
         "net_cash_position": None,  # True if net cash, False if net debt
+        # Cash conversion & economic profit
+        "cash_conversion_ratio": None,      # CFO / Net Income — <0.8 = accrual red flag
+        "cash_conversion_3yr_avg": None,    # 3-year average for stability
+        "roic_wacc_spread": None,           # ROIC - WACC in percentage points
+        "roic_pct": None,                   # standalone ROIC for display
+        "wacc_pct": None,                   # standalone WACC for display
         # Flags
         "context_flags": [],
     }
@@ -629,6 +637,63 @@ def build_fundamentals_context(income_statements: list[dict],
                 if ebitda and ebitda > 0:
                     result["net_debt_to_ebitda"] = round(net_debt / ebitda, 2)
 
+    # ---- Cash conversion ratio: CFO / Net Income ----
+    # <0.8 over multiple years = accrual red flag (earnings not backed by cash)
+    # >1.0 = strong earnings quality (cash exceeds reported profit)
+    ccr_values = []
+    for i in range(min(len(cash_flow_statements), len(income_statements))):
+        cfo = _safe_float(
+            cash_flow_statements[i].get("operatingCashFlow")
+            or cash_flow_statements[i].get("netCashProvidedByOperatingActivities")
+        )
+        ni = _safe_float(income_statements[i].get("netIncome"))
+        if cfo is not None and ni is not None and ni > 0:
+            ccr_values.append(cfo / ni)
+    if ccr_values:
+        result["cash_conversion_ratio"] = round(ccr_values[0], 2)
+        if len(ccr_values) >= 3:
+            result["cash_conversion_3yr_avg"] = round(sum(ccr_values[:3]) / 3, 2)
+
+    # ---- ROIC – WACC spread (economic profit) ----
+    # Positive = company earns above its cost of capital (value-creating growth)
+    # Negative = growth destroys value (every reinvested dollar earns less than it costs)
+    profile = profile or {}
+    if income_statements and balance_sheets:
+        nopat_roic = _compute_nopat_and_roic(income_statements, balance_sheets)
+        if nopat_roic:
+            roic = nopat_roic["roic"]
+            result["roic_pct"] = round(roic * 100, 2)
+
+            # Compute WACC using the same logic as compute_dcf_valuation
+            rfr = risk_free_rate if risk_free_rate is not None else 0.043
+            erp = 0.055
+            beta = _safe_float(profile.get("beta")) or 1.0
+            if beta < 0.3:
+                beta = 1.0
+            cost_of_equity = rfr + beta * erp
+            market_cap = _safe_float(profile.get("mktCap") or profile.get("marketCap")) or 0
+            latest_bs = balance_sheets[0]
+            latest_is = income_statements[0]
+            total_debt_w = _safe_float(latest_bs.get("totalDebt") or latest_bs.get("longTermDebt")) or 0
+            interest_exp = abs(_safe_float(latest_is.get("interestExpense")) or 0)
+            pre_tax_inc = _safe_float(latest_is.get("incomeBeforeTax")) or 0
+            income_tax = _safe_float(latest_is.get("incomeTaxExpense")) or 0
+            cost_of_debt = 0.05
+            if total_debt_w > 0 and interest_exp > 0:
+                cost_of_debt = max(0.02, min(0.20, interest_exp / total_debt_w))
+            eff_tax = 0.25
+            if pre_tax_inc > 0 and income_tax > 0:
+                eff_tax = min(0.40, max(0.0, income_tax / pre_tax_inc))
+            total_cap = market_cap + total_debt_w
+            if total_cap > 0 and total_debt_w > 0:
+                w_e = market_cap / total_cap
+                w_d = total_debt_w / total_cap
+                wacc = (w_e * cost_of_equity) + (w_d * cost_of_debt * (1 - eff_tax))
+            else:
+                wacc = cost_of_equity
+            result["wacc_pct"] = round(wacc * 100, 2)
+            result["roic_wacc_spread"] = round((roic - wacc) * 100, 2)
+
     # ---- Generate context flags ----
     flags = []
     eps_yoy = result["eps_yoy_change"]
@@ -678,6 +743,26 @@ def build_fundamentals_context(income_statements: list[dict],
         flags.append("Negative free cash flow -- company burning cash despite reported earnings")
     elif result["fcf_vs_net_income"] == "diverging":
         flags.append("FCF significantly lagging net income -- check earnings quality")
+
+    # Cash conversion flags
+    ccr_3yr = result.get("cash_conversion_3yr_avg")
+    ccr_latest = result.get("cash_conversion_ratio")
+    if ccr_3yr is not None and ccr_3yr < 0.8:
+        flags.append(f"Cash conversion ratio {ccr_3yr:.2f}x (3yr avg) -- below 0.8 is an accrual quality warning")
+    elif ccr_latest is not None and ccr_latest > 1.3:
+        flags.append(f"Cash conversion ratio {ccr_latest:.2f}x -- strong cash earnings quality")
+
+    # ROIC-WACC spread flags
+    spread = result.get("roic_wacc_spread")
+    if spread is not None:
+        if spread > 10:
+            flags.append(f"ROIC-WACC spread +{spread:.1f}pp -- significant economic profit, growth creates value")
+        elif spread > 0:
+            flags.append(f"ROIC-WACC spread +{spread:.1f}pp -- earning above cost of capital")
+        elif spread > -3:
+            flags.append(f"ROIC-WACC spread {spread:.1f}pp -- roughly break-even economic profit")
+        else:
+            flags.append(f"ROIC-WACC spread {spread:.1f}pp -- growth destroys value at current returns")
 
     # Leverage flags
     nd_ebitda = result["net_debt_to_ebitda"]
@@ -2002,6 +2087,7 @@ def compute_revenue_dcf_valuation(income_statements: list[dict],
             "wacc_breakdown": wacc_breakdown,
             "annual_share_change": round(resolved_share_change_r * 100, 2),
             "hist_share_change": round(hist_share_change_r * 100, 1) if hist_share_change_r is not None else None,
+            "hist_share_change_2yr": round(hist_share_change_r_2yr * 100, 1) if hist_share_change_r_2yr is not None else None,
             "terminal_shares": round(terminal_shares_r, 0),
         },
         "projected_fcfs": projected_fcfs,
@@ -2705,7 +2791,10 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
             }
 
     # Fundamentals context — explains the "why" behind valuation ratios
-    earnings_context = build_fundamentals_context(income, cash_flow, balance_sheet, history_years)
+    earnings_context = build_fundamentals_context(
+        income, cash_flow, balance_sheet, history_years,
+        profile=profile, risk_free_rate=risk_free_rate,
+    )
 
     # Composite score
     composite = compute_composite_score(metrics, config.get("weights", {}), higher_is_better)
