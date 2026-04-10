@@ -1,6 +1,9 @@
 # API keys — never commit
 .env
 
+# Claude Code local settings (contains tool-call history with API keys)
+.claude/
+
 # Python
 __pycache__/
 *.pyc

@@ -12,6 +12,7 @@ Usage:
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -19,7 +20,7 @@ from urllib.request import urlopen, Request
 
 PROJECT_ROOT = Path(__file__).parent.parent
 UNIVERSES_DIR = PROJECT_ROOT / "config" / "universes"
-FMP_API_KEY = "zLtOncZT58CzNDhPwEi7ZGDvfYgAvp7o"
+FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 
 DEFAULT_MIN_MARKET_CAP = 500_000_000  # $500M
 
@@ -142,6 +143,11 @@ def write_universes(universes: dict[str, list[dict]], dry_run: bool = False):
 
 
 def main():
+    if not FMP_API_KEY:
+        print("Error: FMP_API_KEY environment variable is not set.", file=sys.stderr)
+        print("Get a free key at https://financialmodelingprep.com/developer", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="Rebuild universe CSVs from FMP screener")
     parser.add_argument(
         "--min-market-cap", type=int, default=DEFAULT_MIN_MARKET_CAP,
