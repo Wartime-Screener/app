@@ -351,8 +351,11 @@ class FREDClient:
             time.sleep(self.rate_delay - elapsed)
         self._last_request_time = time.time()
 
-    def _cache_key(self, series_id: str, period: str) -> str:
-        raw = f"{series_id}|{period}"
+    def _cache_key(self, series_name: str, period: str) -> str:
+        # Include the actual FRED series_id so changing a series_id (e.g.
+        # AAA → DAAA) automatically invalidates the stale cache entry.
+        actual_id = FRED_SERIES.get(series_name, {}).get("series_id", "")
+        raw = f"{series_name}|{actual_id}|{period}"
         return hashlib.md5(raw.encode()).hexdigest()
 
     def _read_cache(self, cache_key: str) -> list | None:
