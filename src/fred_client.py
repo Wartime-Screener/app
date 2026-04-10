@@ -245,8 +245,8 @@ FRED_SERIES = {
 
     # --- Credit & Lending ---
     "aaa_bond_yield": {
-        "series_id": "AAA",
-        "label": "Moody's Aaa Corporate Bond Yield",
+        "series_id": "DAAA",
+        "label": "Moody's Aaa Corporate Bond Yield (Daily)",
         "units": "%",
         "category": "credit",
     },
