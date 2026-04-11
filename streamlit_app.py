@@ -352,6 +352,7 @@ with st.expander(_api_label, expanded=False):
 _TAB_OPTIONS = [
     "Screener Dashboard",
     "Ticker Deep Dive",
+    "Financial Statements",
     "EIA Inventories",
     "Commodity Prices",
     "Economic Indicators",
@@ -3617,7 +3618,191 @@ elif active_tab == "Ticker Deep Dive":
 
 
 # ================================================================== #
-# TAB 5: EIA Inventories
+# TAB: Financial Statements
+# ================================================================== #
+elif active_tab == "Financial Statements":
+    st.header("Financial Statements")
+
+    _fs_ticker = st.text_input(
+        "Ticker",
+        value="",
+        placeholder="e.g. AAPL",
+        key="fs_ticker",
+    ).strip().upper()
+
+    if _fs_ticker:
+        if not fmp.is_configured:
+            st.error("FMP API key is required.")
+        else:
+            _fs_period_choice = st.radio(
+                "Period",
+                ["Quarterly", "Annual"],
+                horizontal=True,
+                key="fs_period",
+            )
+            _fs_period = "quarter" if _fs_period_choice == "Quarterly" else "annual"
+            _fs_limit = 8 if _fs_period == "quarter" else 5
+
+            with st.spinner(f"Pulling {_fs_period_choice.lower()} statements for {_fs_ticker}..."):
+                _fs_inc = fmp.get_income_statement(_fs_ticker, period=_fs_period, limit=_fs_limit)
+                _fs_bs = fmp.get_balance_sheet(_fs_ticker, period=_fs_period, limit=_fs_limit)
+                _fs_cf = fmp.get_cash_flow(_fs_ticker, period=_fs_period, limit=_fs_limit)
+
+            if not _fs_inc and not _fs_bs and not _fs_cf:
+                st.warning(f"No financial statement data found for **{_fs_ticker}**.")
+            else:
+                # --- Helper to build a statement table ---
+                def _build_statement_table(statements: list[dict], line_items: list[tuple]) -> None:
+                    """Render a financial statement as a styled dataframe.
+
+                    line_items: list of (field_key, display_label, is_bold) tuples.
+                    """
+                    if not statements:
+                        st.info("No data available.")
+                        return
+
+                    # Build column headers from period dates
+                    headers = []
+                    for s in statements:
+                        period = s.get("period", "")
+                        fy = s.get("fiscalYear") or s.get("calendarYear") or s.get("date", "")[:4]
+                        if period and period != "FY":
+                            headers.append(f"{period} {fy}")
+                        else:
+                            headers.append(f"FY {fy}")
+
+                    rows = []
+                    bold_rows = set()
+                    for field, label, is_bold in line_items:
+                        row = {"": label}
+                        has_any = False
+                        for i, s in enumerate(statements):
+                            val = s.get(field)
+                            if val is not None:
+                                has_any = True
+                                # Format in millions
+                                v = float(val)
+                                if abs(v) >= 1e9:
+                                    row[headers[i]] = f"{v/1e9:,.2f}B"
+                                elif abs(v) >= 1e6:
+                                    row[headers[i]] = f"{v/1e6:,.1f}M"
+                                elif abs(v) >= 1:
+                                    row[headers[i]] = f"{v:,.2f}"
+                                else:
+                                    row[headers[i]] = f"{v:.4f}"
+                            else:
+                                row[headers[i]] = "—"
+                        if has_any:
+                            rows.append(row)
+                            if is_bold:
+                                bold_rows.add(len(rows) - 1)
+
+                    if not rows:
+                        st.info("No data available for these line items.")
+                        return
+
+                    _df = pd.DataFrame(rows)
+
+                    def _bold_style(row):
+                        if row.name in bold_rows:
+                            return ["font-weight: bold"] * len(row)
+                        return [""] * len(row)
+
+                    styled = _df.style.apply(_bold_style, axis=1)
+                    st.dataframe(styled, use_container_width=True, hide_index=True, height=min(len(rows) * 37 + 40, 800))
+
+                # --- Line item definitions ---
+                _income_items = [
+                    ("revenue",                                "Revenue",                     True),
+                    ("costOfRevenue",                          "Cost of Revenue",             False),
+                    ("grossProfit",                            "Gross Profit",                True),
+                    ("researchAndDevelopmentExpenses",          "R&D Expenses",                False),
+                    ("sellingGeneralAndAdministrativeExpenses", "SG&A Expenses",               False),
+                    ("operatingExpenses",                      "Total Operating Expenses",    False),
+                    ("operatingIncome",                        "Operating Income",            True),
+                    ("interestExpense",                        "Interest Expense",            False),
+                    ("totalOtherIncomeExpensesNet",             "Other Income / (Expense)",    False),
+                    ("incomeBeforeTax",                        "Income Before Tax",           False),
+                    ("incomeTaxExpense",                       "Income Tax Expense",          False),
+                    ("netIncome",                              "Net Income",                  True),
+                    ("eps",                                    "EPS (Basic)",                 False),
+                    ("epsDiluted",                             "EPS (Diluted)",               True),
+                    ("weightedAverageShsOutDil",               "Diluted Shares Outstanding",  False),
+                    ("ebitda",                                 "EBITDA",                      True),
+                    ("depreciationAndAmortization",            "Depreciation & Amortization", False),
+                ]
+
+                _balance_sheet_items = [
+                    ("cashAndCashEquivalents",       "Cash & Equivalents",          False),
+                    ("shortTermInvestments",         "Short-Term Investments",      False),
+                    ("cashAndShortTermInvestments",   "Cash & ST Investments",       True),
+                    ("netReceivables",               "Net Receivables",             False),
+                    ("inventory",                    "Inventory",                   False),
+                    ("otherCurrentAssets",            "Other Current Assets",        False),
+                    ("totalCurrentAssets",            "Total Current Assets",        True),
+                    ("propertyPlantEquipmentNet",     "PP&E (Net)",                  False),
+                    ("goodwill",                     "Goodwill",                    False),
+                    ("intangibleAssets",              "Intangible Assets",           False),
+                    ("longTermInvestments",           "Long-Term Investments",       False),
+                    ("otherNonCurrentAssets",         "Other Non-Current Assets",    False),
+                    ("totalNonCurrentAssets",         "Total Non-Current Assets",    True),
+                    ("totalAssets",                   "Total Assets",                True),
+                    ("accountPayables",              "Accounts Payable",            False),
+                    ("shortTermDebt",                "Short-Term Debt",             False),
+                    ("otherCurrentLiabilities",       "Other Current Liabilities",   False),
+                    ("totalCurrentLiabilities",       "Total Current Liabilities",   True),
+                    ("longTermDebt",                 "Long-Term Debt",              False),
+                    ("otherNonCurrentLiabilities",    "Other Non-Current Liabilities", False),
+                    ("totalNonCurrentLiabilities",    "Total Non-Current Liabilities", True),
+                    ("totalLiabilities",              "Total Liabilities",           True),
+                    ("retainedEarnings",             "Retained Earnings",           False),
+                    ("totalStockholdersEquity",       "Total Stockholders' Equity",  True),
+                    ("totalDebt",                    "Total Debt",                  True),
+                ]
+
+                _cash_flow_items = [
+                    ("netIncome",                              "Net Income",                   False),
+                    ("depreciationAndAmortization",            "Depreciation & Amortization",  False),
+                    ("stockBasedCompensation",                 "Stock-Based Compensation",     False),
+                    ("changeInWorkingCapital",                 "Change in Working Capital",    False),
+                    ("accountsReceivables",                    "  Accounts Receivable",        False),
+                    ("inventory",                              "  Inventory",                  False),
+                    ("accountsPayables",                       "  Accounts Payable",           False),
+                    ("otherNonCashItems",                      "Other Non-Cash Items",         False),
+                    ("netCashProvidedByOperatingActivities",    "Cash from Operations",         True),
+                    ("investmentsInPropertyPlantAndEquipment",  "Capital Expenditure",          False),
+                    ("acquisitionsNet",                         "Acquisitions (Net)",           False),
+                    ("purchasesOfInvestments",                  "Purchases of Investments",     False),
+                    ("salesMaturitiesOfInvestments",            "Sales of Investments",         False),
+                    ("netCashProvidedByInvestingActivities",    "Cash from Investing",          True),
+                    ("netDebtIssuance",                        "Net Debt Issuance",            False),
+                    ("commonStockRepurchased",                 "Share Repurchases",            False),
+                    ("dividendsPaid",                          "Dividends Paid",               False),
+                    ("netCashProvidedByFinancingActivities",    "Cash from Financing",          True),
+                    ("netChangeInCash",                        "Net Change in Cash",           True),
+                    ("freeCashFlow",                           "Free Cash Flow",               True),
+                    ("capitalExpenditure",                     "Capital Expenditure (Total)",  False),
+                    ("operatingCashFlow",                      "Operating Cash Flow",          True),
+                ]
+
+                # --- Render in tabs ---
+                _fs_tabs = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
+
+                with _fs_tabs[0]:
+                    _build_statement_table(_fs_inc, _income_items)
+
+                with _fs_tabs[1]:
+                    _build_statement_table(_fs_bs, _balance_sheet_items)
+
+                with _fs_tabs[2]:
+                    _build_statement_table(_fs_cf, _cash_flow_items)
+
+    else:
+        st.info("Enter a ticker above to view financial statements.")
+
+
+# ================================================================== #
+# TAB: EIA Inventories
 # ================================================================== #
 elif active_tab == "EIA Inventories":
     st.header("EIA Inventories")
