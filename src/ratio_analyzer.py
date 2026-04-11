@@ -1198,6 +1198,32 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
         # No FCF history at all -- only reachable in reinvestment mode
         base_fcf = reinvestment_info["base_nopat"]
 
+    # --- Maintenance vs Growth capex split ---
+    # D&A as proxy for maintenance capex; excess above D&A = growth capex.
+    _capex_split_years = []
+    for i, stmt in enumerate(cash_flow_statements[:5]):
+        _capex_raw = _safe_float(stmt.get("capitalExpenditure"))
+        _da_cf = _safe_float(stmt.get("depreciationAndAmortization"))
+        if _da_cf is None and i < len(income_statements):
+            _da_cf = _safe_float(income_statements[i].get("depreciationAndAmortization"))
+        if _capex_raw is not None:
+            _total_capex = abs(_capex_raw)
+            _da_val = _da_cf or 0.0
+            _capex_split_years.append({
+                "total": _total_capex,
+                "maintenance": min(_da_val, _total_capex),
+                "growth": max(_total_capex - _da_val, 0),
+            })
+    avg_maintenance_capex = None
+    avg_growth_capex = None
+    maintenance_pct_of_capex = None
+    if _capex_split_years:
+        avg_maintenance_capex = sum(y["maintenance"] for y in _capex_split_years) / len(_capex_split_years)
+        avg_growth_capex = sum(y["growth"] for y in _capex_split_years) / len(_capex_split_years)
+        _total_avg = avg_maintenance_capex + avg_growth_capex
+        if _total_avg > 0:
+            maintenance_pct_of_capex = round(avg_maintenance_capex / _total_avg * 100, 1)
+
     # --- Shares outstanding ---
     shares = None
     if income_statements:
@@ -1537,6 +1563,9 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
                 "annual_share_change": round(resolved_share_change * 100, 2),
                 "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
                 "hist_share_change_2yr": round(hist_share_change_2yr * 100, 1) if hist_share_change_2yr is not None else None,
+                "avg_maintenance_capex": round(avg_maintenance_capex, 0) if avg_maintenance_capex is not None else None,
+                "avg_growth_capex": round(avg_growth_capex, 0) if avg_growth_capex is not None else None,
+                "maintenance_pct_of_capex": maintenance_pct_of_capex,
                 "reinvestment_model": bool(reinvestment_info),
                 "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
                 "roic": round(reinvestment_info["roic"] * 100, 2) if reinvestment_info else None,
@@ -1652,6 +1681,9 @@ def compute_dcf_valuation(cash_flow_statements: list[dict],
             "hist_share_change": round(hist_share_change * 100, 1) if hist_share_change is not None else None,
             "hist_share_change_2yr": round(hist_share_change_2yr * 100, 1) if hist_share_change_2yr is not None else None,
             "terminal_shares": round(terminal_shares, 0),
+            "avg_maintenance_capex": round(avg_maintenance_capex, 0) if avg_maintenance_capex is not None else None,
+            "avg_growth_capex": round(avg_growth_capex, 0) if avg_growth_capex is not None else None,
+            "maintenance_pct_of_capex": maintenance_pct_of_capex,
             "reinvestment_model": bool(reinvestment_info),
             "base_nopat": round(reinvestment_info["base_nopat"], 0) if reinvestment_info else None,
             "roic": round(reinvestment_info["roic"] * 100, 2) if reinvestment_info else None,
