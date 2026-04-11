@@ -40,6 +40,7 @@ from src.ratio_analyzer import (
     compute_earnings_dcf_valuation, compute_reverse_earnings_dcf,
     infer_dcf_model, _load_scoring_config,
     compute_analyst_accuracy, reconcile_capital_actions,
+    compute_owner_earnings,
 )
 from src.screener import scan_universe, scan_all_universes, apply_filters
 from src.edgar_client import EDGARClient
@@ -2740,6 +2741,72 @@ elif active_tab == "Ticker Deep Dive":
                             f"Shares: {assumptions_updated.get('shares_outstanding', 0)/1e9:.2f}B"
                             f"{_fcf_paydown_desc}{_fcf_share_desc}"
                         )
+
+                    # --- Owner Earnings cross-check (FCF mode only) ---
+                    if dcf_mode == "FCF" and dcf_display.get("dcf_price"):
+                        _oe = compute_owner_earnings(
+                            _analysis.get("cash_flow_statements", []),
+                            _analysis.get("income_statements", []),
+                        )
+                        if _oe.get("has_data") and _oe["base_owner_earnings"] > 0:
+                            _oe_base = _oe["base_owner_earnings"]
+                            _fcf_base_oe = _oe["base_fcf"]
+                            _oe_gap = _oe["gap"]
+                            # Scale the DCF price proportionally: OE price = FCF price × (OE / FCF)
+                            _oe_dcf_price = None
+                            if _fcf_base_oe and _fcf_base_oe > 0:
+                                _oe_dcf_price = dcf_display["dcf_price"] * (_oe_base / _fcf_base_oe)
+
+                            st.markdown("#### Owner Earnings Cross-Check (Buffett)")
+                            st.caption(
+                                "Owner Earnings = CFO - Maintenance Capex (D&A proxy). More conservative "
+                                "than FCF for companies investing heavily in growth — shows what the "
+                                "business would generate if it stopped expanding."
+                            )
+                            _oe_cols = st.columns(5)
+                            with _oe_cols[0]:
+                                st.metric(
+                                    "Owner Earnings",
+                                    f"${_oe_base/1e9:.2f}B",
+                                    help="CFO minus maintenance capex (D&A as proxy). "
+                                         "Excludes discretionary growth capex.",
+                                )
+                            with _oe_cols[1]:
+                                st.metric(
+                                    "Reported FCF",
+                                    f"${_fcf_base_oe/1e9:.2f}B",
+                                    help="CFO minus total capex (maintenance + growth).",
+                                )
+                            with _oe_cols[2]:
+                                st.metric(
+                                    "Growth Capex",
+                                    f"${_oe.get('avg_growth_capex', 0)/1e9:.2f}B/yr",
+                                    help="Discretionary investment above D&A. This is the gap "
+                                         "between Owner Earnings and FCF — capex the owner "
+                                         "could choose not to spend.",
+                                )
+                            with _oe_cols[3]:
+                                _maint_pct = _oe.get("maintenance_pct_of_capex")
+                                st.metric(
+                                    "Maint. % of Capex",
+                                    f"{_maint_pct:.0f}%" if _maint_pct is not None else "N/A",
+                                    help="What fraction of total capex is maintenance (D&A). "
+                                         "High (>90%) = mature, most capex just replaces aging assets. "
+                                         "Low (<70%) = heavy grower, FCF understates earnings power.",
+                                )
+                            with _oe_cols[4]:
+                                if _oe_dcf_price is not None:
+                                    _oe_upside = None
+                                    if _dcf_current_price and _dcf_current_price > 0:
+                                        _oe_upside = round((_oe_dcf_price / _dcf_current_price - 1) * 100, 1)
+                                    st.metric(
+                                        "OE-Based DCF Price",
+                                        f"${_oe_dcf_price:,.2f}",
+                                        delta=f"{_oe_upside:+.1f}% vs current" if _oe_upside is not None else None,
+                                        delta_color="normal",
+                                        help="DCF price if Owner Earnings were used as the base "
+                                             "instead of reported FCF. Same growth/WACC/terminal assumptions.",
+                                    )
 
                     # --- Sensitivity table ---
                     if dcf_mode == "Earnings":

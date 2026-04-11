@@ -1001,6 +1001,109 @@ def _compute_nopat_and_roic(income_statements: list[dict],
     }
 
 
+def compute_owner_earnings(cash_flow_statements: list[dict],
+                            income_statements: list[dict]) -> dict:
+    """
+    Compute Buffett's Owner Earnings and the maintenance/growth capex split.
+
+    Owner Earnings = CFO - Maintenance Capex
+    Where:
+      Maintenance Capex = min(D&A, |Total Capex|)  (D&A as proxy)
+      Growth Capex      = max(|Total Capex| - D&A, 0)  (discretionary investment)
+
+    Owner Earnings >= FCF because it only subtracts maintenance capex, not total.
+    The gap (= growth capex) is the "discretionary reinvestment" that Buffett
+    argues should not be deducted when valuing the business, since the owner
+    could choose not to grow.
+
+    Uses a weighted median of up to 5 years (same smoothing as the FCF DCF)
+    to avoid one-off capex spikes distorting the base.
+
+    Returns:
+        Dict with owner_earnings, fcf, growth_capex, maintenance_capex,
+        per-year breakdown, and has_data flag.
+    """
+    if not cash_flow_statements or len(cash_flow_statements) < 2:
+        return {"has_data": False, "note": "Insufficient cash flow history"}
+
+    yearly = []
+    for i, stmt in enumerate(cash_flow_statements[:5]):
+        cfo = _safe_float(
+            stmt.get("operatingCashFlow")
+            or stmt.get("netCashProvidedByOperatingActivities")
+        )
+        capex_raw = _safe_float(stmt.get("capitalExpenditure"))
+        da = _safe_float(stmt.get("depreciationAndAmortization"))
+        fcf = _safe_float(stmt.get("freeCashFlow"))
+
+        if cfo is None or capex_raw is None:
+            continue
+
+        total_capex = abs(capex_raw)
+        # D&A might come from income statement if not on cash flow
+        if da is None and i < len(income_statements):
+            da = _safe_float(income_statements[i].get("depreciationAndAmortization"))
+        if da is None:
+            da = 0.0
+
+        maintenance = min(da, total_capex)
+        growth = max(total_capex - da, 0)
+        oe = cfo - maintenance
+
+        yearly.append({
+            "cfo": cfo,
+            "total_capex": total_capex,
+            "da": da,
+            "maintenance_capex": maintenance,
+            "growth_capex": growth,
+            "owner_earnings": oe,
+            "fcf": fcf or (cfo - total_capex),
+        })
+
+    if not yearly:
+        return {"has_data": False, "note": "Could not compute Owner Earnings"}
+
+    # Weighted median (same as FCF DCF base) — recent years weighted more
+    n = len(yearly)
+    weights = list(range(n, 0, -1))
+    oe_values = [y["owner_earnings"] for y in yearly]
+    paired = sorted(zip(oe_values, weights), key=lambda x: x[0])
+    total_weight = sum(weights)
+    cumulative = 0
+    base_oe = paired[len(paired) // 2][0]
+    for val, w in paired:
+        cumulative += w
+        if cumulative >= total_weight / 2:
+            base_oe = val
+            break
+
+    # Same for FCF for comparison
+    fcf_values = [y["fcf"] for y in yearly]
+    paired_fcf = sorted(zip(fcf_values, weights[:len(fcf_values)]), key=lambda x: x[0])
+    cumulative_fcf = 0
+    base_fcf = paired_fcf[len(paired_fcf) // 2][0]
+    for val, w in paired_fcf:
+        cumulative_fcf += w
+        if cumulative_fcf >= total_weight / 2:
+            base_fcf = val
+            break
+
+    avg_growth_capex = sum(y["growth_capex"] for y in yearly) / len(yearly)
+    avg_maintenance = sum(y["maintenance_capex"] for y in yearly) / len(yearly)
+
+    return {
+        "has_data": True,
+        "base_owner_earnings": base_oe,
+        "base_fcf": base_fcf,
+        "gap": base_oe - base_fcf,
+        "avg_growth_capex": avg_growth_capex,
+        "avg_maintenance_capex": avg_maintenance,
+        "avg_total_capex": avg_growth_capex + avg_maintenance,
+        "maintenance_pct_of_capex": round(avg_maintenance / (avg_growth_capex + avg_maintenance) * 100, 1) if (avg_growth_capex + avg_maintenance) > 0 else None,
+        "yearly": yearly,
+    }
+
+
 def compute_dcf_valuation(cash_flow_statements: list[dict],
                            income_statements: list[dict],
                            profile: dict,
