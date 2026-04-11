@@ -2182,6 +2182,40 @@ elif active_tab == "Ticker Deep Dive":
                                     f"{_rfr_label}"
                                 )
 
+                            # Capex split (maintenance vs growth)
+                            _maint_capex = assumptions.get("avg_maintenance_capex")
+                            _growth_capex = assumptions.get("avg_growth_capex")
+                            _maint_pct = assumptions.get("maintenance_pct_of_capex")
+                            if _maint_capex is not None and _growth_capex is not None:
+                                _capex_cols = st.columns(3)
+                                with _capex_cols[0]:
+                                    st.metric(
+                                        "Maintenance Capex",
+                                        f"${_maint_capex/1e9:.2f}B/yr",
+                                        help="D&A as proxy — the capex needed to sustain current operations.",
+                                    )
+                                with _capex_cols[1]:
+                                    st.metric(
+                                        "Growth Capex",
+                                        f"${_growth_capex/1e9:.2f}B/yr",
+                                        help="Capex above D&A — discretionary investment in expanding the business.",
+                                    )
+                                with _capex_cols[2]:
+                                    _capex_label = (
+                                        "Mature" if (_maint_pct or 0) > 90
+                                        else "Moderate grower" if (_maint_pct or 0) > 70
+                                        else "Heavy grower"
+                                    )
+                                    st.metric(
+                                        "Maint. % of Capex",
+                                        f"{_maint_pct:.0f}%" if _maint_pct is not None else "N/A",
+                                        delta=_capex_label,
+                                        delta_color="off",
+                                        help=">90% = mature (most capex replaces aging assets). "
+                                             "<70% = heavy grower (FCF understates earnings power). "
+                                             "Feeds into the Owner Earnings cross-check below.",
+                                    )
+
                             # Debt paydown input
                             _auto_paydown = assumptions.get("auto_debt_paydown")
                             _net_debt_now = assumptions.get("net_debt", 0)
