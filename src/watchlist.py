@@ -54,13 +54,15 @@ def save_watchlist(data: dict) -> None:
 # CRUD helpers
 # ---------------------------------------------------------------------------
 
-def add_to_watchlist(ticker: str, reason: str = "", price_at_add: float | None = None) -> dict:
+def add_to_watchlist(ticker: str, reason: str = "", price_at_add: float | None = None,
+                     target_price: float | None = None) -> dict:
     """Add a ticker to the watchlist. Returns the new item dict."""
     item = {
         "id": str(uuid4()),
         "ticker": ticker.upper().strip(),
         "added_date": str(date.today()),
         "price_at_add": round(price_at_add, 2) if price_at_add else None,
+        "target_price": round(target_price, 2) if target_price else None,
         "reason": reason.strip(),
         "notes": [],
     }
@@ -78,6 +80,24 @@ def remove_from_watchlist(item_id: str) -> bool:
     if len(data["items"]) < original_len:
         save_watchlist(data)
         return True
+    return False
+
+
+def update_watchlist_item(item_id: str, reason: str | None = None,
+                          target_price: float | None = None,
+                          price_at_add: float | None = None) -> bool:
+    """Update editable fields for a watchlist item. Returns True if found."""
+    data = load_watchlist()
+    for item in data["items"]:
+        if item["id"] == item_id:
+            if reason is not None:
+                item["reason"] = reason.strip()
+            if target_price is not None:
+                item["target_price"] = round(target_price, 2) if target_price > 0 else None
+            if price_at_add is not None:
+                item["price_at_add"] = round(price_at_add, 2) if price_at_add > 0 else None
+            save_watchlist(data)
+            return True
     return False
 
 

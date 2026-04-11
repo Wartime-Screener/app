@@ -56,7 +56,7 @@ from src.portfolio import (
 )
 from src.watchlist import (
     load_watchlist, save_watchlist, add_to_watchlist,
-    remove_from_watchlist, update_watchlist_notes,
+    remove_from_watchlist, update_watchlist_notes, update_watchlist_item,
 )
 from streamlit_js_eval import streamlit_js_eval
 
@@ -4749,15 +4749,18 @@ elif active_tab == "Watchlist":
     # ---- Add to Watchlist form ---- #
     with st.expander("➕ Add to Watchlist", expanded=len(wl_items) == 0):
         with st.form(key="add_watchlist_form", clear_on_submit=True):
-            wl_col1, wl_col2 = st.columns([1, 3])
+            wl_col1, wl_col2, wl_col3 = st.columns([1, 3, 1])
             with wl_col1:
                 wl_ticker = st.text_input("Ticker", placeholder="e.g. EXPO")
             with wl_col2:
                 wl_reason = st.text_input("Reason / Thesis", placeholder="e.g. Waiting for pullback, AI tailwind")
+            with wl_col3:
+                wl_target = st.number_input("Target Entry ($)", min_value=0.0, value=0.0,
+                                            step=0.5, format="%.2f",
+                                            help="Your target buy price. Shows % gap from current price.")
             wl_submit = st.form_submit_button("Add to Watchlist", type="primary", use_container_width=True)
 
         if wl_submit and wl_ticker.strip():
-            # Fetch current price to store as price_at_add
             _add_price = None
             try:
                 _add_df = tradier.get_quotes([wl_ticker.strip().upper()])
@@ -4765,7 +4768,8 @@ elif active_tab == "Watchlist":
                     _add_price = float(_add_df.iloc[0]["last"])
             except Exception:
                 pass
-            new_item = add_to_watchlist(wl_ticker, wl_reason, price_at_add=_add_price)
+            _target = wl_target if wl_target > 0 else None
+            new_item = add_to_watchlist(wl_ticker, wl_reason, price_at_add=_add_price, target_price=_target)
             price_msg = f" at ${_add_price:,.2f}" if _add_price else ""
             st.success(f"Added {new_item['ticker']}{price_msg} to watchlist.")
             st.rerun()
@@ -4810,13 +4814,26 @@ elif active_tab == "Watchlist":
             else:
                 since_added_str = "—"
 
+            target_price = item.get("target_price")
+            if target_price:
+                target_str = f"${target_price:,.2f}"
+                if price:
+                    to_target_pct = ((target_price - price) / price) * 100
+                    to_target_str = f"{to_target_pct:+.1f}%"
+                else:
+                    to_target_str = "—"
+            else:
+                target_str = "—"
+                to_target_str = "—"
+
             wl_rows.append({
                 "Ticker": ticker,
                 "Price": f"${price:,.2f}" if price else "N/A",
-                "Change": f"{change:+.2f}" if change is not None else "—",
                 "Change %": f"{change_pct:+.2f}%" if change_pct is not None else "—",
                 "Added Price": f"${price_at_add:,.2f}" if price_at_add else "—",
                 "Since Added": since_added_str,
+                "Target Entry": target_str,
+                "% to Target": to_target_str,
                 "Reason": item.get("reason", ""),
                 "Added": added,
                 "Days": days_watching,
@@ -4841,15 +4858,52 @@ elif active_tab == "Watchlist":
             st.session_state["pending_tab"] = "Ticker Deep Dive"
             st.rerun()
 
-        # ---- Remove from Watchlist ---- #
-        with st.expander("Remove from Watchlist"):
-            remove_options = [f"{item['ticker']} — {item.get('reason', '')[:40]}" for item in wl_items]
-            wl_remove_selection = st.selectbox("Select ticker to remove", remove_options, key="wl_remove_select")
-            if st.button("Remove", key="wl_remove_btn", type="secondary"):
-                remove_idx = remove_options.index(wl_remove_selection)
-                remove_id = wl_items[remove_idx]["id"]
-                if remove_from_watchlist(remove_id):
-                    st.success(f"Removed from watchlist.")
+        # ---- Edit / Remove ---- #
+        with st.expander("✏️ Edit / Remove"):
+            edit_options = [f"{item['ticker']} — {item.get('reason', '')[:40]}" for item in wl_items]
+            wl_edit_selection = st.selectbox("Select item", edit_options, key="wl_edit_select")
+            edit_idx = edit_options.index(wl_edit_selection)
+            edit_item = wl_items[edit_idx]
+
+            with st.form(key="edit_watchlist_form"):
+                e_col1, e_col2, e_col3 = st.columns([2, 1, 1])
+                with e_col1:
+                    e_reason = st.text_input("Reason / Thesis",
+                                             value=edit_item.get("reason", ""),
+                                             key="wl_edit_reason")
+                with e_col2:
+                    _cur_target = edit_item.get("target_price") or 0.0
+                    e_target = st.number_input("Target Entry ($)",
+                                               min_value=0.0,
+                                               value=float(_cur_target),
+                                               step=0.5, format="%.2f",
+                                               key="wl_edit_target")
+                with e_col3:
+                    _cur_added_price = edit_item.get("price_at_add") or 0.0
+                    e_added_price = st.number_input("Added Price ($)",
+                                                    min_value=0.0,
+                                                    value=float(_cur_added_price),
+                                                    step=0.5, format="%.2f",
+                                                    key="wl_edit_added_price")
+                save_col, remove_col = st.columns(2)
+                with save_col:
+                    e_save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
+                with remove_col:
+                    e_remove = st.form_submit_button("🗑️ Remove", use_container_width=True)
+
+            if e_save:
+                update_watchlist_item(
+                    edit_item["id"],
+                    reason=e_reason,
+                    target_price=e_target if e_target > 0 else None,
+                    price_at_add=e_added_price if e_added_price > 0 else None,
+                )
+                st.success("Watchlist item updated.")
+                st.rerun()
+
+            if e_remove:
+                if remove_from_watchlist(edit_item["id"]):
+                    st.success(f"Removed {edit_item['ticker']} from watchlist.")
                     st.rerun()
 
         st.divider()
