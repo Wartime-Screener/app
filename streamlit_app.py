@@ -1164,6 +1164,64 @@ elif active_tab == "Ticker Deep Dive":
                             f"WACC: {_wacc:.1f}%"
                         )
 
+            # Dividend metrics
+            _div = analysis.get("dividend_metrics") or {}
+            if _div.get("has_data"):
+                div_cols = st.columns(5)
+                with div_cols[0]:
+                    _dy = _div.get("current_yield")
+                    st.metric(
+                        "Dividend Yield",
+                        f"{_dy:.2f}%" if _dy is not None else "N/A",
+                    )
+                with div_cols[1]:
+                    _ep = _div.get("earnings_payout_pct")
+                    st.metric(
+                        "Payout (Earnings)",
+                        f"{_ep:.0f}%" if _ep is not None else "N/A",
+                        help="Dividends paid / Net Income. >80% = limited room for dividend growth.",
+                    )
+                with div_cols[2]:
+                    _fp = _div.get("fcf_payout_pct")
+                    st.metric(
+                        "Payout (FCF)",
+                        f"{_fp:.0f}%" if _fp is not None else "N/A",
+                        help="Dividends paid / Free Cash Flow. >100% = dividends exceed FCF, "
+                             "funded by borrowing or drawing down cash.",
+                    )
+                with div_cols[3]:
+                    _cagr = _div.get("cagr_5yr")
+                    if _div.get("is_variable_dividend"):
+                        st.metric("DPS CAGR", "Variable",
+                                  help="Dividend per share fluctuates too much for a meaningful CAGR "
+                                       "(likely includes special/variable dividends).")
+                    elif _cagr is not None:
+                        st.metric("DPS CAGR", f"{_cagr:+.1f}%",
+                                  help="Compound annual growth rate of dividends per share.")
+                    else:
+                        st.metric("DPS CAGR", "N/A")
+                with div_cols[4]:
+                    if _div.get("dividend_cut_risk"):
+                        st.metric("Cut Risk", "Elevated",
+                                  help=_div.get("note", ""))
+                    else:
+                        st.metric("Cut Risk", "Low")
+
+                # DPS history sparkline
+                _dps_hist = _div.get("dps_history", [])
+                if len(_dps_hist) >= 3:
+                    _dps_display = list(reversed(_dps_hist))  # oldest first for chart
+                    st.caption(
+                        "DPS history: " +
+                        " → ".join(f"${d['dps']:.2f}" for d in _dps_display[-5:])
+                    )
+
+                if _div.get("note"):
+                    if _div.get("dividend_cut_risk"):
+                        st.warning(_div["note"])
+                    elif _div.get("is_variable_dividend"):
+                        st.info(_div["note"])
+
             # Context flags
             if context_flags:
                 for cflag in context_flags:
