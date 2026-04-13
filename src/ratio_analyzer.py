@@ -515,6 +515,122 @@ def compute_analyst_accuracy(analyst_estimates: list[dict],
     return result
 
 
+def compute_dividend_metrics(income_statements: list[dict],
+                              cash_flow_statements: list[dict],
+                              profile: dict) -> dict:
+    """
+    Compute dividend metrics from raw financial statements.
+
+    Derives everything from cash flow (dividendsPaid) and income statement
+    (shares outstanding, net income) rather than relying on FMP's pre-computed
+    fields (which are missing from the stable API).
+
+    Returns:
+        Dict with current_yield, dps, dps_history, cagr_5yr, earnings_payout,
+        fcf_payout, dividend_cut_risk, is_variable_dividend, has_data.
+    """
+    result = {
+        "has_data": False,
+        "current_dps": None,
+        "current_yield": None,
+        "dps_history": [],        # [{year, dps}] newest first
+        "cagr_5yr": None,
+        "earnings_payout_pct": None,
+        "fcf_payout_pct": None,
+        "dividend_cut_risk": False,
+        "is_variable_dividend": False,
+        "note": None,
+    }
+
+    if not cash_flow_statements or not income_statements:
+        return result
+
+    price = _safe_float((profile or {}).get("price"))
+    last_dividend = _safe_float((profile or {}).get("lastDividend"))
+
+    # Build per-year DPS from cash flow dividendsPaid / diluted shares
+    dps_series = []
+    for i in range(min(len(cash_flow_statements), len(income_statements))):
+        cf = cash_flow_statements[i]
+        inc = income_statements[i]
+        div_paid = _safe_float(cf.get("dividendsPaid") or cf.get("commonDividendsPaid"))
+        shares = _safe_float(inc.get("weightedAverageShsOutDil") or inc.get("weightedAverageShsOut"))
+        fy = inc.get("fiscalYear") or inc.get("calendarYear") or (inc.get("date", "")[:4])
+
+        if div_paid is not None and shares and shares > 0:
+            dps = abs(div_paid) / shares
+            dps_series.append({"year": fy, "dps": round(dps, 4)})
+
+    if not dps_series or dps_series[0]["dps"] < 0.001:
+        # No dividends paid or essentially zero
+        return result
+
+    result["has_data"] = True
+    result["dps_history"] = dps_series
+    result["current_dps"] = dps_series[0]["dps"]
+
+    # Current yield — prefer profile's lastDividend (annualized forward) if available,
+    # else use our most-recent-year computed DPS
+    if price and price > 0:
+        if last_dividend and last_dividend > 0:
+            result["current_yield"] = round(last_dividend / price * 100, 2)
+        else:
+            result["current_yield"] = round(dps_series[0]["dps"] / price * 100, 2)
+
+    # Payout ratios from most recent year
+    latest_cf = cash_flow_statements[0]
+    latest_inc = income_statements[0]
+    div_paid_abs = abs(_safe_float(
+        latest_cf.get("dividendsPaid") or latest_cf.get("commonDividendsPaid")) or 0)
+    ni = _safe_float(latest_inc.get("netIncome"))
+    fcf = _safe_float(latest_cf.get("freeCashFlow"))
+
+    if ni and ni > 0 and div_paid_abs > 0:
+        result["earnings_payout_pct"] = round(div_paid_abs / ni * 100, 1)
+    if fcf and fcf > 0 and div_paid_abs > 0:
+        result["fcf_payout_pct"] = round(div_paid_abs / fcf * 100, 1)
+
+    # Dividend cut risk: earnings payout >80% OR fcf payout >100%
+    ep = result["earnings_payout_pct"]
+    fp = result["fcf_payout_pct"]
+    if (ep is not None and ep > 80) or (fp is not None and fp > 100):
+        result["dividend_cut_risk"] = True
+
+    # Detect variable/special dividend pattern (high coefficient of variation)
+    dps_values = [d["dps"] for d in dps_series if d["dps"] > 0]
+    if len(dps_values) >= 3:
+        mean_dps = sum(dps_values) / len(dps_values)
+        if mean_dps > 0:
+            variance = sum((d - mean_dps) ** 2 for d in dps_values) / len(dps_values)
+            cv = (variance ** 0.5) / mean_dps
+            if cv > 0.5:
+                result["is_variable_dividend"] = True
+
+    # DPS CAGR — only compute if NOT a variable dividend (CAGR is meaningless otherwise)
+    if not result["is_variable_dividend"] and len(dps_values) >= 3:
+        oldest = dps_values[-1]
+        newest = dps_values[0]
+        years = len(dps_values) - 1
+        if oldest > 0 and newest > 0:
+            result["cagr_5yr"] = round(((newest / oldest) ** (1 / years) - 1) * 100, 1)
+
+    # Generate note for edge cases
+    if result["is_variable_dividend"]:
+        result["note"] = (
+            "Variable/special dividend pattern detected — DPS fluctuates significantly "
+            "year to year. CAGR not shown (would be misleading)."
+        )
+    elif result["dividend_cut_risk"]:
+        reasons = []
+        if ep is not None and ep > 80:
+            reasons.append(f"earnings payout {ep:.0f}%")
+        if fp is not None and fp > 100:
+            reasons.append(f"FCF payout {fp:.0f}%")
+        result["note"] = f"Dividend cut risk: {' and '.join(reasons)}."
+
+    return result
+
+
 def build_fundamentals_context(income_statements: list[dict],
                                cash_flow_statements: list[dict] | None = None,
                                balance_sheets: list[dict] | None = None,
@@ -2982,6 +3098,9 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
     altman = compute_altman_z_score(income, balance_sheet, profile, _sector, _industry)
     beneish = compute_beneish_m_score(income, balance_sheet, cash_flow, _sector, _industry)
 
+    # Dividend metrics — derived from raw statements, not FMP pre-computed fields
+    dividend_metrics = compute_dividend_metrics(income, cash_flow, profile)
+
     return {
         "ticker": ticker,
         "company_name": company_name,
@@ -3004,6 +3123,7 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
         "piotroski_f_score": piotroski,
         "altman_z_score": altman,
         "beneish_m_score": beneish,
+        "dividend_metrics": dividend_metrics,
     }
 
 
