@@ -1,8 +1,8 @@
 """
 Core analytical engine for historical ratio analysis and percentile scoring.
 
-Pulls financial ratios from FMP, computes percentile ranks against each
-ticker's own history, and generates a composite "undervaluation" score.
+Pulls financial ratios from FMP and computes percentile ranks against each
+ticker's own history.
 """
 
 import logging
@@ -3048,7 +3048,7 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
     )
 
     # Composite score
-    composite = compute_composite_score(metrics, config.get("weights", {}), higher_is_better)
+    composite = None  # Removed — composite score mixed valuation and quality in misleading ways
 
     # Opportunity flags
     flags = flag_opportunities(metrics, higher_is_better, config.get("opportunity_thresholds", {}))
@@ -3127,47 +3127,8 @@ def analyze_ticker(ticker: str, fmp_client, universe_info: dict | None = None,
     }
 
 
-def compute_composite_score(metrics: dict, weights: dict,
-                              higher_is_better: set | None = None) -> float | None:
-    """
-    Compute a weighted average of percentile ranks.
 
-    For "higher is better" metrics, the percentile is inverted (100 - percentile)
-    so that a LOW composite score means the stock is potentially undervalued/strong.
 
-    Args:
-        metrics: Dict of metric_name -> {current, percentile, ...}.
-        weights: Dict of metric_name -> weight (0-1). Must sum to ~1.
-        higher_is_better: Set of metric names where higher values are favorable.
-
-    Returns:
-        Composite score (0-100) or None if insufficient data.
-    """
-    if higher_is_better is None:
-        config = _load_scoring_config()
-        higher_is_better = set(config.get("higher_is_better", []))
-
-    total_weight = 0.0
-    weighted_sum = 0.0
-
-    for metric_name, weight in weights.items():
-        if metric_name not in metrics:
-            continue
-        pct = metrics[metric_name].get("percentile")
-        if pct is None:
-            continue
-
-        # Invert for "higher is better" so low composite = good
-        if metric_name in higher_is_better:
-            pct = 100.0 - pct
-
-        weighted_sum += pct * weight
-        total_weight += weight
-
-    if total_weight == 0:
-        return None
-
-    return round(weighted_sum / total_weight, 1)
 
 
 def flag_opportunities(metrics: dict, higher_is_better: set | None = None,

@@ -27,7 +27,7 @@ def scan_universe(universe_name: str, fmp_client, tradier_client,
         progress_callback: Optional callable(current, total, ticker) for progress updates.
 
     Returns:
-        DataFrame of analysis results sorted by composite_score ascending.
+        DataFrame of analysis results sorted by ticker.
     """
     universe_df = load_universe(universe_name)
     if universe_df.empty:
@@ -68,7 +68,6 @@ def scan_universe(universe_name: str, fmp_client, tradier_client,
                 "current_price": None,
                 "market_cap": None,
                 "metrics": {},
-                "composite_score": None,
                 "opportunity_flags": [],
             }
 
@@ -88,8 +87,8 @@ def scan_universe(universe_name: str, fmp_client, tradier_client,
         results.append(_flatten_analysis(analysis))
 
     df = pd.DataFrame(results)
-    if not df.empty and "composite_score" in df.columns:
-        df = df.sort_values("composite_score", ascending=True, na_position="last")
+    if not df.empty and "ticker" in df.columns:
+        df = df.sort_values("ticker", ascending=True, na_position="last")
         df = df.reset_index(drop=True)
 
     return df
@@ -111,7 +110,7 @@ def scan_all_universes(fmp_client, tradier_client,
         cancel_check: Optional callable() that returns True if scan should stop.
 
     Returns:
-        Combined DataFrame sorted by composite_score ascending.
+        Combined DataFrame sorted by ticker.
     """
     if universe_names is None:
         universe_names = list_universes()
@@ -166,7 +165,6 @@ def scan_all_universes(fmp_client, tradier_client,
                     "current_price": None,
                     "market_cap": None,
                     "metrics": {},
-                    "composite_score": None,
                     "opportunity_flags": [],
                 }
 
@@ -188,8 +186,8 @@ def scan_all_universes(fmp_client, tradier_client,
     df = pd.DataFrame(frames)
     if not df.empty:
         df = df.drop_duplicates(subset="ticker", keep="first")
-        if "composite_score" in df.columns:
-            df = df.sort_values("composite_score", ascending=True, na_position="last")
+        if "ticker" in df.columns:
+            df = df.sort_values("ticker", ascending=True, na_position="last")
         df = df.reset_index(drop=True)
 
     return df
@@ -202,8 +200,8 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     Args:
         df: Screening results DataFrame.
         filters: Dict of filter specifications. Supported keys:
-            - max_composite_score: float — exclude scores above this
-            - min_composite_score: float
+            - min_piotroski: int — minimum Piotroski F-Score
+            - min_altman: float — minimum Altman Z-Score
             - max_pe: float
             - min_pe: float
             - max_debt_to_equity: float
@@ -217,18 +215,6 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         return df
 
     result = df.copy()
-
-    if "max_composite_score" in filters and "composite_score" in result.columns:
-        result = result[
-            result["composite_score"].isna()
-            | (result["composite_score"] <= filters["max_composite_score"])
-        ]
-
-    if "min_composite_score" in filters and "composite_score" in result.columns:
-        result = result[
-            result["composite_score"].isna()
-            | (result["composite_score"] >= filters["min_composite_score"])
-        ]
 
     if "max_pe" in filters and "pe_ratio" in result.columns:
         result = result[
@@ -292,7 +278,6 @@ def _flatten_analysis(analysis: dict) -> dict:
         "segment": analysis.get("segment"),
         "current_price": analysis.get("current_price"),
         "market_cap": analysis.get("market_cap"),
-        "composite_score": analysis.get("composite_score"),
         "flags": "; ".join(analysis.get("opportunity_flags", [])),
         "eps_trend": (analysis.get("earnings_context") or {}).get("eps_trend"),
         "eps_yoy_change": (analysis.get("earnings_context") or {}).get("eps_yoy_change"),
