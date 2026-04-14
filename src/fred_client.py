@@ -243,6 +243,56 @@ FRED_SERIES = {
         "category": "rates",
     },
 
+    # --- JOLTS by Sector ---
+    "jolts_mining": {
+        "series_id": "JTU110099JOL",
+        "label": "Mining & Logging",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_construction": {
+        "series_id": "JTS2000JOL",
+        "label": "Construction",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_manufacturing": {
+        "series_id": "JTS3000JOL",
+        "label": "Manufacturing",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_trade_transport": {
+        "series_id": "JTS4000JOL",
+        "label": "Trade, Transport & Utilities",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_professional": {
+        "series_id": "JTS540099JOL",
+        "label": "Professional & Business Svcs",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_education_health": {
+        "series_id": "JTS6000JOL",
+        "label": "Education & Health Svcs",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_leisure": {
+        "series_id": "JTS7000JOL",
+        "label": "Leisure & Hospitality",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+    "jolts_government": {
+        "series_id": "JTS9000JOL",
+        "label": "Government",
+        "units": "Thousands",
+        "category": "jolts_sector",
+    },
+
     # --- Credit & Lending ---
     "aaa_bond_yield": {
         "series_id": "DAAA",
@@ -284,6 +334,11 @@ ECON_CATEGORIES = {
     ],
     "Inflation": ["cpi", "core_cpi", "pce", "core_pce", "ppi"],
     "GDP": ["real_gdp", "real_gdp_growth"],
+    "JOLTS by Sector": [
+        "jolts_mining", "jolts_construction", "jolts_manufacturing",
+        "jolts_trade_transport", "jolts_professional", "jolts_education_health",
+        "jolts_leisure", "jolts_government",
+    ],
     "Credit & Lending": [
         "aaa_bond_yield", "hy_oas", "ig_oas", "mortgage_30y",
     ],

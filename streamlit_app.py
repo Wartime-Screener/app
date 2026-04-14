@@ -4648,6 +4648,60 @@ elif active_tab == "Economic Indicators":
                         )
                         st.plotly_chart(fig_rgdp, use_container_width=True)
 
+                elif category_name == "JOLTS by Sector":
+                    # Stacked area chart showing sector composition of job openings
+                    _jolts_colors = [
+                        "#ff7f0e", "#1f77b4", "#2ca02c", "#d62728",
+                        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+                    ]
+                    # Multi-line chart (each sector as its own line)
+                    fig_jolts = go.Figure()
+                    for ci, key in enumerate(series_keys):
+                        data = all_data.get(key, [])
+                        if not data:
+                            continue
+                        fig_jolts.add_trace(go.Scatter(
+                            x=[d["period"] for d in reversed(data)],
+                            y=[d["value"] for d in reversed(data)],
+                            mode="lines",
+                            name=FRED_SERIES[key]["label"],
+                            line=dict(color=_jolts_colors[ci % len(_jolts_colors)], width=2),
+                        ))
+                    fig_jolts.update_layout(
+                        title="Job Openings by Sector (Thousands)",
+                        template="plotly_dark", height=500,
+                        xaxis_title="Date", yaxis_title="Thousands",
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.3),
+                    )
+                    st.plotly_chart(fig_jolts, use_container_width=True)
+
+                    # Stacked bar: most recent month composition
+                    _jolts_latest = {}
+                    for key in series_keys:
+                        data = all_data.get(key, [])
+                        if data:
+                            _jolts_latest[FRED_SERIES[key]["label"]] = data[0]["value"]
+                    if _jolts_latest:
+                        # Sort by size
+                        _sorted_sectors = sorted(_jolts_latest.items(), key=lambda x: x[1], reverse=True)
+                        _total = sum(v for _, v in _sorted_sectors)
+                        fig_bar = go.Figure()
+                        fig_bar.add_trace(go.Bar(
+                            x=[s[0] for s in _sorted_sectors],
+                            y=[s[1] for s in _sorted_sectors],
+                            marker_color=_jolts_colors[:len(_sorted_sectors)],
+                            text=[f"{s[1]/1000:.0f}K ({s[1]/_total*100:.0f}%)" for s in _sorted_sectors],
+                            textposition="outside",
+                        ))
+                        _latest_date = all_data.get(series_keys[0], [{}])[0].get("period", "")
+                        fig_bar.update_layout(
+                            title=f"Latest Month Breakdown — {_latest_date} (Total: {_total/1000:.1f}M openings)",
+                            template="plotly_dark", height=400,
+                            yaxis_title="Thousands",
+                            showlegend=False,
+                        )
+                        st.plotly_chart(fig_bar, use_container_width=True)
+
                 elif category_name == "Rates & Money":
                     # Separate charts: yields together, spread separate, M2 separate
                     yield_keys = [k for k in series_keys if k.startswith("treasury_") or k == "fed_funds"]
